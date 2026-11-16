@@ -12,3 +12,14 @@
 /* v0.2.5: keep full garments visible in wardrobe thumbnails */
 .card .item-img img.item-img{object-fit:contain;object-position:center center;width:100%;height:100%;display:block;background:#f4f5f5;}
 .card .item-img{overflow:hidden;background:#f4f5f5;}
+
+/* v0.2.8: uniform outline navigation icons */
+.bottom button{font-size:inherit;min-width:54px;gap:5px;line-height:1.1}.bottom .nav-icon{width:24px;height:24px;display:block;flex-shrink:0;stroke:currentColor;stroke-width:1.8;fill:none}.bottom button span{font-size:11px;line-height:1.2}
+
+/* v0.2.10: all navigation icons inherit the same color from their button. */
+.bottom button .nav-icon,.bottom button .nav-icon *{stroke:currentColor!important}.bottom button .nav-icon{color:inherit;fill:none!important}.bottom button .nav-icon *{fill:none!important}
+
+/* v0.2.11: wardrobe frame, divider and handles use identical inherited stroke. Other icons unchanged. */
+.bottom button[data-page="closet"] .nav-icon,
+.bottom button[data-page="closet"] .nav-icon rect,
+.bottom button[data-page="closet"] .nav-icon path { stroke: currentColor; stroke-width: 1.8; stroke-opacity: 1; fill: none; }
