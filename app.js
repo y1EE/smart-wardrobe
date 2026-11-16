@@ -32,15 +32,22 @@ function sampleArt(x){
  return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
 }
 const visual=x=>x?.photo||sampleArt(x);
-// 純色背景連通區域去背：非 AI，複雜背景效果有限。
-async function removePlainBackground(src){
+// 本機去背：適合單純背景，提供容差與柔化邊緣；不是 AI 人像分割。
+async function removePlainBackground(src,tolerance=38,feather=16){
  const im=new Image();im.src=src;await im.decode();const c=document.createElement('canvas');c.width=im.naturalWidth;c.height=im.naturalHeight;
  const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(im,0,0);const frame=ctx.getImageData(0,0,c.width,c.height),a=frame.data,w=c.width,h=c.height;
- const at=(x,y)=>(y*w+x)*4;const corners=[[0,0],[w-1,0],[0,h-1],[w-1,h-1]];
- const bg=[0,1,2].map(k=>corners.map(([x,y])=>a[at(x,y)+k]).sort((a,b)=>a-b)[1]);
- const close=i=>{let d=0;for(let k=0;k<3;k++)d+=(a[i+k]-bg[k])**2;return d<42*42*3};
- const seen=new Uint8Array(w*h),stack=[];for(const [x,y] of corners)stack.push(y*w+x);
- while(stack.length){const n=stack.pop();if(n<0||n>=w*h||seen[n])continue;seen[n]=1;const i=n*4;if(!close(i))continue;a[i+3]=0;const x=n%w,y=Math.floor(n/w);if(x>0)stack.push(n-1);if(x<w-1)stack.push(n+1);if(y>0)stack.push(n-w);if(y<h-1)stack.push(n+w)}
+ const points=[[0,0],[w-1,0],[0,h-1],[w-1,h-1],[Math.floor(w/2),0],[Math.floor(w/2),h-1],[0,Math.floor(h/2)],[w-1,Math.floor(h/2)]];
+ const rgb=points.map(([x,y])=>{let i=(y*w+x)*4;return [a[i],a[i+1],a[i+2]]});
+ // Use the most consistent corner/background cluster, avoiding one corner occupied by clothing.
+ let best=rgb[0],bestScore=-1;for(const v of rgb){let score=rgb.filter(u=>Math.hypot(...u.map((z,k)=>z-v[k]))<35).length;if(score>bestScore){bestScore=score;best=v}}
+ const bg=[0,1,2].map(k=>{let near=rgb.filter(v=>Math.hypot(...v.map((z,j)=>z-best[j]))<35);return near.reduce((sum,v)=>sum+v[k],0)/near.length});
+ const dist=n=>{let i=n*4;return Math.hypot(a[i]-bg[0],a[i+1]-bg[1],a[i+2]-bg[2])/Math.sqrt(3)};
+ const seen=new Uint8Array(w*h),stack=[];for(let x=0;x<w;x++){stack.push(x,(h-1)*w+x)}for(let y=0;y<h;y++){stack.push(y*w,y*w+w-1)}
+ // Flood fill only from image edges, so enclosed clothing regions are preserved.
+ while(stack.length){const n=stack.pop();if(seen[n])continue;seen[n]=1;const d=dist(n);if(d>tolerance+feather)continue;
+  const i=n*4;a[i+3]=d<=tolerance?0:Math.round(255*(d-tolerance)/Math.max(1,feather));
+  const x=n%w,y=(n/w)|0;if(x>0)stack.push(n-1);if(x<w-1)stack.push(n+1);if(y>0)stack.push(n-w);if(y<h-1)stack.push(n+w);
+ }
  ctx.putImageData(frame,0,0);return c.toDataURL('image/png');
 }
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -68,7 +75,7 @@ return combos.filter(c=>!c.ids.some(id=>{
 }));}
 
 function outfitHTML(o){return `<article class="card outfit"><span class="pill">${esc(o.label)}</span><ul>${o.ids.map(id=>`<li>${esc(items.find(x=>x.id===id)?.name||id)}</li>`).join('')}</ul><p class="muted">${esc(o.why)}</p><button class="small-btn" data-record="${esc(o.ids.join(','))}">記錄今天穿這套</button></article>`}
-function itemCard(x){return `<article class="card"><div class="item-img ${x.photo?'':'placeholder'}">${`<img class="item-img" src="${visual(x)}" alt="${esc(x.name)}${x.photo?'':'（示意圖）'}">`}</div><h3>${esc(x.name)}</h3><div class="row"><span class="pill">${esc(x.category)}</span>${x.status==='wishlist'?'<span class="pill">考慮購買</span>':''}${!x.photo?'<span class="pill">示意圖</span>':''}</div><p class="muted">${esc(x.color||'未分類')} · ${esc(x.style||'未設定')}</p><div class="row">${x.photo?`<button class="small-btn secondary" data-cutout="${esc(x.id)}">${x.photoCutout?'重新去背':'去背（純色）'}</button>${x.photoOriginal?`<button class="small-btn secondary" data-restore="${esc(x.id)}">還原原圖</button>`:''}`:''}<button class="small-btn secondary" data-edit="${esc(x.id)}">編輯</button><button class="small-btn danger" data-delete="${esc(x.id)}">刪除</button></div></article>`}
+function itemCard(x){return `<article class="card"><div class="item-img ${x.photo?'':'placeholder'}">${`<img class="item-img" src="${visual(x)}" alt="${esc(x.name)}${x.photo?'':'（示意圖）'}">`}</div><h3>${esc(x.name)}</h3><div class="row"><span class="pill">${esc(x.category)}</span>${x.status==='wishlist'?'<span class="pill">考慮購買</span>':''}${!x.photo?'<span class="pill">示意圖</span>':''}</div><p class="muted">${esc(x.color||'未分類')} · ${esc(x.style||'未設定')}</p><div class="row">${x.photo?`<button class="small-btn" data-ai-cutout="${esc(x.id)}">AI 去背（測試版）</button><button class="small-btn secondary" data-cutout="${esc(x.id)}">${x.photoCutout?'調整去背':'去背設定'}</button>${x.photoOriginal?`<button class="small-btn secondary" data-restore="${esc(x.id)}">還原原圖</button>`:''}`:''}<button class="small-btn secondary" data-edit="${esc(x.id)}">編輯</button><button class="small-btn danger" data-delete="${esc(x.id)}">刪除</button></div></article>`}
 function render(){document.querySelectorAll('.bottom button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));const app=$('#app');const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'long'});const count=owned().length;let html='';
 if(page==='home'){html=`<div class="hero"><div class="muted">${esc(today)}</div><h2>今天想穿什麼？</h2><p>從你已擁有的衣物，挑出適合自己的日常穿搭。</p><p class="notice">目前為手動季節模式，尚未連接即時天氣。</p><button data-page="outfits">看看今日推薦</button> <button class="secondary" data-page="studio">自由搭配工作室</button></div><div class="stats"><div class="card stat"><strong>${count}</strong><span class="muted">已擁有</span></div><div class="card stat"><strong>${items.length-count}</strong><span class="muted">購物候選</span></div><div class="card stat"><strong>${outfits().length}</strong><span class="muted">搭配提案</span></div></div><div class="section-head"><h2>今日穿搭靈感</h2></div><div class="stack">${outfits().slice(0,1).map(outfitHTML).join('')||'<p class="empty">衣櫃單品不足，請先新增衣物。</p>'}</div>`}
 if(page==='closet'){let cats=['全部',...new Set(items.map(x=>x.category))];let shown=items.filter(x=>(filter==='全部'||x.category===filter)&&(showWishlist||x.status==='owned'));html=`<div class="section-head"><h2>我的衣櫃 · ${shown.length} 件</h2><button data-add>＋ 新增</button></div><div class="row"><label style="margin:0"><input type="checkbox" id="wishlistToggle" ${showWishlist?'checked':''} style="display:inline;width:auto;margin:0"> 顯示購物候選</label></div><div class="chips">${cats.map(c=>`<button class="chip ${filter===c?'active':''}" data-filter="${esc(c)}">${esc(c)}</button>`).join('')}</div><div class="grid">${shown.map(itemCard).join('')}</div>${shown.length?'':'<p class="empty">此分類目前沒有單品</p>'}`}
@@ -82,7 +89,7 @@ function editor(id){let x=items.find(v=>v.id===id),f=$('#itemForm');f.reset();fo
 async function compressPhoto(file){if(!file)return null;if(!file.type.startsWith('image/'))throw Error('請選擇圖片檔');if(file.size>15*1024*1024)throw Error('圖片請小於 15MB');let bitmap=await createImageBitmap(file);let scale=Math.min(1,1000/Math.max(bitmap.width,bitmap.height));let c=document.createElement('canvas');c.width=Math.max(1,Math.round(bitmap.width*scale));c.height=Math.max(1,Math.round(bitmap.height*scale));c.getContext('2d').drawImage(bitmap,0,0,c.width,c.height);bitmap.close();return c.toDataURL('image/jpeg',.78)}
 $('#itemForm').addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,fd=new FormData(f),id=String(fd.get('id')||uid()),old=items.find(x=>x.id===id);let data={...old,id};for(let k of ['name','category','color','style','season','status','notes'])data[k]=String(fd.get(k)||'').trim();if(!data.name)return;try{let file=$('#photoInput').files[0];if(file){data.photo=await compressPhoto(file);data.photoOriginal=data.photo;data.photoCutout=false;}await put(STORE,data);$('#editor').close();await load()}catch(err){alert('儲存失敗：'+err.message+'。可能是瀏覽器儲存空間不足。')}});
 $('#cancelEditor').onclick=()=>$('#editor').close();$('#photoInput').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{$('#photoPreview').src=await compressPhoto(f);$('#photoPreview').hidden=false}catch(err){alert(err.message)}};
-$('#app').addEventListener('click',async e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.page){page=b.dataset.page;render()}if('add'in b.dataset)editor();if(b.dataset.edit)editor(b.dataset.edit);if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.delete&&confirm('確定刪除這件衣物？')){await del(STORE,b.dataset.delete);await load()}if(b.dataset.record){let ids=b.dataset.record.split(',');let date=new Date().toLocaleDateString('sv-SE');await put('history',{id:uid(),date,ids,names:ids.map(id=>items.find(x=>x.id===id)?.name||id)});alert('已記錄今天的穿搭！')}if(b.dataset.delrecord&&confirm('刪除這筆紀錄？')){await del('history',b.dataset.delrecord);renderHistory()}if(b.dataset.cutout){await cutoutItem(b.dataset.cutout)}if(b.dataset.restore){await restoreItem(b.dataset.restore)}if(b.dataset.studioAdd){studioAdd(b.dataset.studioAdd)}if(b.dataset.studioSelect){studioActive=b.dataset.studioSelect;render()}if(b.dataset.studioRemove){studioLayers=studioLayers.filter(x=>x.key!==b.dataset.studioRemove);studioActive=null;saveStudioDraft();render()}if(b.id==='studioSave')await saveStudioOutfit();if(b.id==='studioClear'&&confirm('清空目前疊加的衣物？')){studioLayers=[];studioActive=null;saveStudioDraft();render()}if(b.id==='studioAvatarClear'&&confirm('移除本機全身照片？')){studioAvatar=null;await del('studio','avatar');render()}if(b.id==='exportBtn')await exportData();if(b.id==='importBtn')$('#importFile').click()});
+$('#app').addEventListener('click',async e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.page){page=b.dataset.page;render()}if('add'in b.dataset)editor();if(b.dataset.edit)editor(b.dataset.edit);if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.delete&&confirm('確定刪除這件衣物？')){await del(STORE,b.dataset.delete);await load()}if(b.dataset.record){let ids=b.dataset.record.split(',');let date=new Date().toLocaleDateString('sv-SE');await put('history',{id:uid(),date,ids,names:ids.map(id=>items.find(x=>x.id===id)?.name||id)});alert('已記錄今天的穿搭！')}if(b.dataset.delrecord&&confirm('刪除這筆紀錄？')){await del('history',b.dataset.delrecord);renderHistory()}if(b.dataset.aiCutout){await aiCutoutItem(b.dataset.aiCutout)}if(b.dataset.cutout){await cutoutItem(b.dataset.cutout)}if(b.dataset.restore){await restoreItem(b.dataset.restore)}if(b.dataset.studioAdd){studioAdd(b.dataset.studioAdd)}if(b.dataset.studioSelect){studioActive=b.dataset.studioSelect;render()}if(b.dataset.studioRemove){studioRemove(b.dataset.studioRemove)}if(b.id==='studioSave')await saveStudioOutfit();if(b.id==='studioClear'&&confirm('清空目前疊加的衣物？')){studioLayers=[];studioActive=null;saveStudioDraft();render()}if(b.id==='studioAvatarClear'&&confirm('移除本機全身照片？')){studioAvatar=null;await del('studio','avatar');render()}if(b.id==='exportBtn')await exportData();if(b.id==='importBtn')$('#importFile').click()});
 $('#app').addEventListener('change',e=>{if(e.target.id==='wishlistToggle'){showWishlist=e.target.checked;render()}if(e.target.id==='studioCategory'){studioCategory=e.target.value;render()}if(e.target.id==='studioAvatarFile'){setStudioAvatar(e.target.files[0])}if(e.target.id==='seasonSelect'){localStorage.setItem('sw-season',e.target.value);render()}});document.querySelector('.bottom').addEventListener('click',e=>{let b=e.target.closest('[data-page]');if(b){page=b.dataset.page;render()}});
 async function exportData(){let data={format:'smart-wardrobe-v0.1',exportedAt:new Date().toISOString(),items:await all(STORE),history:await all('history'),studio:await all('studio')};let blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='smart-wardrobe-backup-'+new Date().toLocaleDateString('sv-SE')+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000)}
 $('#importFile').addEventListener('change',async e=>{let file=e.target.files[0];if(!file)return;try{let data=JSON.parse(await file.text());if(data.format!=='smart-wardrobe-v0.1'||!Array.isArray(data.items)||!Array.isArray(data.history)||data.items.some(x=>!x||typeof x.id!=='string'||typeof x.name!=='string')||data.history.some(x=>!x||typeof x.id!=='string'))throw Error('備份格式不正確');if(!confirm('匯入將覆蓋現有衣櫃與紀錄，確定繼續？'))return;await new Promise((res,rej)=>{let t=db.transaction([STORE,'history'],'readwrite');t.objectStore(STORE).clear();t.objectStore('history').clear();data.items.forEach(x=>t.objectStore(STORE).put(x));data.history.forEach(x=>t.objectStore('history').put(x));t.oncomplete=res;t.onerror=()=>rej(t.error)});if(Array.isArray(data.studio)){await new Promise((res,rej)=>{const t=db.transaction('studio','readwrite'),st=t.objectStore('studio');st.clear();data.studio.forEach(x=>{if(x&&typeof x.id==='string')st.put(x)});t.oncomplete=res;t.onerror=()=>rej(t.error)});studioAvatar=(await all('studio')).find(x=>x.id==='avatar')?.photo||null;}await load();alert('匯入完成')}catch(err){alert('匯入失敗：'+err.message)}finally{e.target.value=''}});
@@ -106,10 +113,11 @@ function studioHTML(){
  <section class="card"><h2>點選衣櫃搭配</h2><label>衣物分類<select id="studioCategory">${studioCategories.map(c=>`<option ${c===studioCategory?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
  <div class="studio-items">${choices.map(x=>`<button class="studio-item" data-studio-add="${esc(x.id)}"><span><img src="${visual(x)}" alt=""></span><small>${esc(x.name)}</small></button>`).join('')||'<p class="muted">此分類尚無已擁有衣物。</p>'}</div>
  <p class="notice">只顯示「已擁有」單品；考慮購買的衣服不會混入。</p>
- <h3>目前搭配</h3><div class="stack">${studioLayers.map(l=>`<button class="secondary" data-studio-select="${esc(l.key)}">${esc(items.find(x=>x.id===l.id)?.name||'已移除的衣物')} · 點選調整</button>`).join('')||'<p class="muted">還沒有選擇衣物。</p>'}</div>
+ <h3>目前搭配（可單件移除）</h3><div class="stack">${studioLayers.map(l=>`<div class="studio-selected-row"><button class="secondary" data-studio-select="${esc(l.key)}">${esc(items.find(x=>x.id===l.id)?.name||'已移除的衣物')} · 調整</button><button class="danger small-btn" data-studio-remove="${esc(l.key)}" aria-label="移除此件衣物">✕ 移除</button></div>`).join('')||'<p class="muted">還沒有選擇衣物。</p>'}</div>
  ${studioLayers.some(l=>l.id==='SW-P003')&&!studioLayers.some(l=>l.id==='SW-A001')?'<p class="notice">提醒：灰黑寬版牛仔褲需要搭配米白色編織皮帶。</p>':''}
  <p class="notice">提醒：無袖、掛脖或大挖袖單品，請自行搭配能遮住腋下的內搭或外套。此版本無法從照片自動判斷遮蔽效果。</p></section></div>`
 }
+function studioRemove(key){studioLayers=studioLayers.filter(x=>x.key!==key);studioActive=studioLayers.at(-1)?.key||null;saveStudioDraft();render()}
 function studioAdd(id){const it=items.find(x=>x.id===id&&x.status==='owned');if(!it)return;const key=uid();studioLayers.push({key,id,x:30,y:25,w:42});studioActive=key;saveStudioDraft();render()}
 async function setStudioAvatar(file){if(!file)return;try{const photo=await compressPhoto(file);await put('studio',{id:'avatar',photo});studioAvatar=photo;render()}catch(err){alert('照片儲存失敗：'+err.message)}}
 function setupStudioCanvas(){const stage=$('#studioStage');if(!stage)return;const slider=$('#studioSize');if(slider)slider.oninput=e=>{let l=studioLayers.find(x=>x.key===studioActive);if(l){l.w=Number(e.target.value);saveStudioDraft();const el=Array.from(stage.querySelectorAll('[data-layer]')).find(n=>n.dataset.layer===l.key);if(el)el.style.width=l.w+'%'}};
@@ -119,5 +127,50 @@ function setupStudioCanvas(){const stage=$('#studioStage');if(!stage)return;cons
 }
 async function saveStudioOutfit(){const ids=[...new Set(studioLayers.map(x=>x.id).filter(id=>items.some(x=>x.id===id&&x.status==='owned')))];if(!ids.length){alert('請先選擇衣物。');return}const date=new Date().toLocaleDateString('sv-SE');try{await put('history',{id:uid(),date,ids,names:ids.map(id=>items.find(x=>x.id===id)?.name||id),source:'studio'});alert('已將這套穿搭儲存至穿搭紀錄！')}catch(err){alert('儲存失敗：'+err.message)}}
 
-async function cutoutItem(id){const x=items.find(v=>v.id===id);if(!x?.photo)return; if(!confirm('嘗試移除純色背景？複雜背景可能失敗，會保留原圖供還原。'))return;try{const original=x.photoOriginal||x.photo;const photo=await removePlainBackground(original);await put(STORE,{...x,photo,photoOriginal:original,photoCutout:true});await load()}catch(e){alert('去背失敗：'+e.message)}}
+async function cutoutItem(id){
+ const x=items.find(v=>v.id===id);if(!x?.photo)return;
+ const toleranceRaw=prompt('去背容差（0–100）：數值越高，移除背景越多；建議先試 30。若衣服也被去除，請調低數值。',String(x.cutoutTolerance??30));
+ if(toleranceRaw===null)return;const tolerance=Number(toleranceRaw);if(!Number.isFinite(tolerance)||tolerance<0||tolerance>100){alert('請輸入 0 到 100 的數值。');return}
+ const featherRaw=prompt('邊緣柔化（0–40）：建議 12；數值越高，邊緣越柔和。',String(x.cutoutFeather??12));
+ if(featherRaw===null)return;const feather=Number(featherRaw);if(!Number.isFinite(feather)||feather<0||feather>40){alert('請輸入 0 到 40 的數值。');return}
+ try{const original=x.photoOriginal||x.photo;const photo=await removePlainBackground(original,tolerance,feather);await put(STORE,{...x,photo,photoOriginal:original,photoCutout:true,cutoutTolerance:tolerance,cutoutFeather:feather});await load();alert('去背已套用。請檢查衣服邊緣；如果有缺損，可點「調整去背」降低容差，或還原原圖。')}catch(e){alert('去背失敗：'+e.message)}
+}
 async function restoreItem(id){const x=items.find(v=>v.id===id);if(!x?.photoOriginal)return;await put(STORE,{...x,photo:x.photoOriginal,photoCutout:false});await load()}
+
+// v0.2.4: Experimental client-side semantic background removal. No photos are
+// uploaded to our own server. The first use downloads third-party model files.
+// The preview is never committed until the user explicitly confirms.
+async function aiCutoutItem(id){
+ const item=items.find(x=>x.id===id);if(!item?.photo)return;
+ const original=item.photoOriginal||item.photo;
+ const dlg=document.createElement('dialog');dlg.className='ai-preview-dialog';
+ dlg.innerHTML=`<div class="ai-preview-inner"><h2>AI 智慧去背（測試版）</h2><p class="muted">首次執行需下載模型，可能花費一些時間。照片在此瀏覽器處理；模型檔案由第三方提供。複雜背景或多件衣服重疊時仍可能失敗。</p><p id="aiStatus" role="status">正在準備模型…</p><div class="ai-compare"><figure><img src="${original}" alt="原始照片"><figcaption>原始照片</figcaption></figure><figure><div class="ai-checker"><img id="aiResult" alt="AI 去背預覽" hidden></div><figcaption>去背預覽</figcaption></figure></div><div class="actions"><button type="button" id="aiCancel" class="secondary">取消</button><button type="button" id="aiApply" disabled>確認套用</button></div></div>`;
+ document.body.append(dlg);dlg.showModal();
+ let alive=true,result=null;
+ const cancel=()=>{alive=false;dlg.close();dlg.remove()};
+ dlg.querySelector('#aiCancel').onclick=cancel;
+ dlg.addEventListener('cancel',e=>{e.preventDefault();cancel()});
+ dlg.querySelector('#aiApply').onclick=async()=>{
+  if(!result||!alive)return;
+  try{await put(STORE,{...item,photo:result,photoOriginal:original,photoCutout:true,cutoutMethod:'ai'});cancel();await load()}
+  catch(err){dlg.querySelector('#aiStatus').textContent='儲存失敗：'+err.message}
+ };
+ try{
+  // Lazy-load only on demand to keep the wardrobe lightweight.
+  const module=await import('https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/+esm');
+  if(!alive)return;
+  const removeBackground=module.removeBackground||module.default;
+  if(typeof removeBackground!=='function')throw Error('模型程式載入不完整');
+  dlg.querySelector('#aiStatus').textContent='正在辨識衣物，請保持此頁開啟…';
+  const blob=await removeBackground(original,{progress:(key,current,total)=>{
+   if(alive&&total>0)dlg.querySelector('#aiStatus').textContent=`模型載入中：${Math.round(current/total*100)}%`;
+  }});
+  if(!alive)return;
+  if(!(blob instanceof Blob))throw Error('AI 模型未產生有效圖片');
+  result=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('圖片轉換失敗'));reader.readAsDataURL(blob)});
+  if(!alive)return;
+  dlg.querySelector('#aiResult').src=result;dlg.querySelector('#aiResult').hidden=false;
+  dlg.querySelector('#aiApply').disabled=false;
+  dlg.querySelector('#aiStatus').textContent='完成。請確認主要衣物與邊緣是否完整，再決定是否套用。';
+ }catch(err){if(alive)dlg.querySelector('#aiStatus').textContent='AI 去背無法完成：'+err.message+'。可取消並使用原本的去背設定，或換素色背景拍攝。'}
+}
