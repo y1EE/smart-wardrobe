@@ -300,9 +300,28 @@ function parseOrderText(text,brand='GU'){
  }
  commit();return found;
 }
+// v0.3.6.1: Parse official app share messages locally; never send share text to AI.
+function parseProductShareText(raw){
+ const text=String(raw||'').trim();
+ const urlMatch=text.match(/https:\/\/[^\s<>「」【】]+/i);
+ if(!urlMatch)return {error:'分享文字中找不到 HTTPS 商品網址。請確認複製的是完整分享內容。'};
+ let url;try{url=new URL(urlMatch[0].replace(/[，。；、）)]+$/g,''))}catch{return {error:'分享文字中的網址格式不正確'}}
+ const host=url.hostname.toLowerCase();
+ const brand=host==='gu-global.com'||host.endsWith('.gu-global.com')?'GU':host==='uniqlo.com'||host.endsWith('.uniqlo.com')?'UNIQLO':'';
+ if(!brand||url.protocol!=='https:')return {error:'目前只支援 GU／UNIQLO 官方 HTTPS 商品連結'};
+ const bracket=text.match(/【([^】]{2,180})】/);
+ let title=(bracket?.[1]||text.slice(0,text.indexOf(urlMatch[0]))).replace(/^快來看看\s*/,'').replace(/[。！!，,\s]+$/,'').trim();
+ const sku=title.match(/\b(\d{6})\b/)?.[1]||text.match(/(?:商品編號|貨號)\s*[:：]?\s*(\d{6})/)?.[1]||'';
+ title=title.replace(/\s*\b\d{6}\b\s*$/,'').trim();
+ if(!title||title.length>110)return {error:'找不到明確的商品名稱，請使用手動新增'};
+ const name=title.replace(/^(女裝|男裝|童裝)\s*/,'').trim();
+ const item={name,brand,orderId:'',date:'',color:'',size:'',sku,price:null,quantity:1,category:orderCategory(name),photo:null,include:true,officialUrl:url.toString(),photoStatus:'已取得 App 分享的官方商品網址，請點「讀取官方商品照片」；顏色及尺寸請自行確認。'};
+ item.include=item.category!=='排除';
+ return {item};
+}
 function orderKey(x){return [x.brand||'',x.orderId||'',x.sku||'',x.name.trim().toLowerCase(),x.color.trim().toLowerCase(),x.size.trim().toLowerCase()].join('|')}
 function orderMerge(incoming){for(const x of incoming){let old=orderDraft.find(y=>orderKey(y)===orderKey(x));if(old){old.quantity=Math.max(old.quantity,x.quantity||1);continue}orderDraft.push(x)}renderOrderDraft()}
-function openOrderImporter(){orderDraft=[];orderOCRStatus='';const dlg=$('#orderDialog');dlg.showModal();$('#geminiWorkerUrl').value=localStorage.getItem('sw-gemini-worker')||'';$('#geminiStatus').textContent='';renderOrderDraft()}
+function openOrderImporter(){orderDraft=[];orderOCRStatus='';const dlg=$('#orderDialog');dlg.showModal();$('#geminiWorkerUrl').value=localStorage.getItem('sw-gemini-worker')||'';$('#geminiStatus').textContent='';$('#productShareStatus').textContent='';$('#productShareText').value='';renderOrderDraft()}
 function officialSearchUrl(x){
  const brand=x.brand==='GU'?'GU':x.brand==='UNIQLO'?'UNIQLO':'';
  const q=[brand,x.sku,x.color,x.name].filter(Boolean).join(' ');
@@ -321,6 +340,7 @@ function orderScript(){return new Promise((res,rej)=>{if(window.Tesseract)return
 async function orderOCR(files){if(orderOCRBusy)return;orderOCRBusy=true;$('#orderOCRBtn').disabled=true;try{await orderScript();orderOCRStatus='載入繁體中文辨識模型中，首次使用可能需要一些時間…';renderOrderDraft();const worker=await Tesseract.createWorker('chi_tra+eng',1,{logger:m=>{if(m.status){orderOCRStatus=`辨識中：${m.status} ${m.progress?Math.round(m.progress*100)+'%':''}`;$('#orderOCRStatus').textContent=orderOCRStatus}}});try{for(let i=0;i<files.length;i++){orderOCRStatus=`正在辨識第 ${i+1} / ${files.length} 張截圖…`;renderOrderDraft();let result=await worker.recognize(files[i]);let raw=result.data.text;$('#orderText').value+=($('#orderText').value?'\n':'')+raw;orderMerge(parseOrderText(raw,$('#orderBrand').value))}}finally{await worker.terminate()}orderOCRStatus='辨識完成。請逐項確認資料，漏辨識時可直接修改文字或手動新增。'}catch(err){orderOCRStatus='辨識未完成：'+err.message+'。可改用「貼上文字分析」或手動新增。'}finally{orderOCRBusy=false;$('#orderOCRBtn').disabled=false;renderOrderDraft()}}
 $('#orderOCRBtn').addEventListener('click',()=>{let f=$('#orderImages').files;if(!f.length)return alert('請先選擇訂單截圖');orderOCR([...f])});
 $('#orderParseBtn').addEventListener('click',()=>{let text=$('#orderText').value.trim();if(!text)return alert('請先貼上訂單文字');let parsed=parseOrderText(text,$('#orderBrand').value);if(!parsed.length)return alert('未辨識到商品名稱。請確認文字內容，或使用手動新增。');orderMerge(parsed)});
+$('#productShareImportBtn').addEventListener('click',()=>{const result=parseProductShareText($('#productShareText').value);const status=$('#productShareStatus');if(result.error){status.textContent=result.error;return}const item=result.item;const existing=orderDraft.find(x=>x.brand===item.brand&&x.sku&&x.sku===item.sku&&x.officialUrl===item.officialUrl);if(existing){status.textContent='此商品已在待確認清單中。';return}orderMerge([item]);status.textContent='已加入待確認清單：'+item.name+'（'+(item.sku||'無商品編號')+'）。請確認尺寸、顏色，並點「讀取官方商品照片」。';});
 $('#orderAddBtn').addEventListener('click',()=>{orderDraft.push({name:'',brand:$('#orderBrand').value,orderId:'',date:'',color:'',size:'',sku:'',price:null,quantity:1,category:'上衣',photo:null,include:true});renderOrderDraft()});
 $('#orderResults').addEventListener('input',e=>{let parent=e.target.closest('[data-order-index]');if(!parent)return;let x=orderDraft[Number(parent.dataset.orderIndex)],field=e.target.dataset.orderField;if(!field)return;x[field]=field==='include'?e.target.checked:field==='price'?(e.target.value===''?null:Number(e.target.value)):e.target.value;$('#orderSaveBtn').textContent=`確認加入衣櫃（${orderDraft.filter(x=>x.include&&x.category!=='排除').length} 件）`});
 $('#orderResults').addEventListener('change',async e=>{let parent=e.target.closest('[data-order-index]');if(!parent)return;let x=orderDraft[Number(parent.dataset.orderIndex)];if(e.target.matches('[data-order-photo]')){let file=e.target.files[0];if(file){x.photo=await compressPhoto(file);x.photoSource='manual';x.photoStatus='已選擇自行上傳的照片';renderOrderDraft()}}else if(e.target.dataset.orderField){let field=e.target.dataset.orderField;x[field]=field==='include'?e.target.checked:e.target.value;$('#orderSaveBtn').textContent=`確認加入衣櫃（${orderDraft.filter(x=>x.include&&x.category!=='排除').length} 件）`}});
@@ -341,7 +361,7 @@ $('#orderResults').addEventListener('click',async e=>{
  renderOrderDraft();
 });
 $('#orderResults').addEventListener('click',e=>{let b=e.target.closest('[data-order-remove]');if(!b)return;orderDraft.splice(Number(b.dataset.orderRemove),1);renderOrderDraft()});
-$('#orderSaveBtn').addEventListener('click',async()=>{const selected=orderDraft.filter(x=>x.include&&x.category!=='排除'&&x.name.trim());if(!selected.length)return alert('請先選擇至少一件衣物');let added=0,duplicate=0;try{for(const x of selected){const key=orderKey(x);if(items.some(it=>it.importKey===key)){duplicate++;continue}const item={id:uid(),name:x.name.trim(),category:x.category,color:x.color,style:'',season:'all',status:'owned',notes:[x.brand,x.sku?'商品編號 '+x.sku:'',x.size?'尺寸 '+x.size:'',x.price!=null?'購入價 NT$'+x.price:'',x.date?'購入日期 '+x.date:''].filter(Boolean).join(' · '),brand:x.brand,sku:x.sku,size:x.size,price:x.price,orderDate:x.date,importKey:key};if(x.photo){item.photo=x.photo;item.photoOriginal=x.photo;item.photoCutout=false;item.photoSource=x.photoSource||'manual';item.officialUrl=x.officialUrl||''}await put(STORE,item);items.push(item);added++}$('#orderDialog').close();await load();alert(`匯入完成：新增 ${added} 件，略過重複 ${duplicate} 件。`)}catch(err){await load();alert('部分匯入失敗：'+err.message)}});
+$('#orderSaveBtn').addEventListener('click',async()=>{const selected=orderDraft.filter(x=>x.include&&x.category!=='排除'&&x.name.trim());if(!selected.length)return alert('請先選擇至少一件衣物');let added=0,duplicate=0;try{for(const x of selected){const key=orderKey(x);if(items.some(it=>it.importKey===key)){duplicate++;continue}const item={id:uid(),name:x.name.trim(),category:x.category,color:x.color,style:'',season:'all',status:'owned',notes:[x.brand,x.sku?'商品編號 '+x.sku:'',x.size?'尺寸 '+x.size:'',x.price!=null?'購入價 NT$'+x.price:'',x.date?'購入日期 '+x.date:''].filter(Boolean).join(' · '),brand:x.brand,sku:x.sku,size:x.size,price:x.price,orderDate:x.date,importKey:key};if(x.officialUrl)item.officialUrl=x.officialUrl;if(x.photo){item.photo=x.photo;item.photoOriginal=x.photo;item.photoCutout=false;item.photoSource=x.photoSource||'manual'}await put(STORE,item);items.push(item);added++}$('#orderDialog').close();await load();alert(`匯入完成：新增 ${added} 件，略過重複 ${duplicate} 件。`)}catch(err){await load();alert('部分匯入失敗：'+err.message)}});
 
 
 // v0.3.5.1: Gemini vision via private Cloudflare Worker; never place API key in the frontend.

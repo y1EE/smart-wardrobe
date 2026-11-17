@@ -8,3 +8,11 @@
 - 保留 Cloudflare Worker Placement 的 GCP asia-east1 設定；部署新版 Worker 程式不應更改 Placement。
 - 更新 GitHub Pages 根目錄檔案，並在 Cloudflare 部署 `cloudflare-worker/worker.js`。不要上傳任何 API Key。
 - 現有本機衣櫃資料不會被此更新清空。
+
+
+## v0.3.6.1 App 分享文字匯入
+- 在「匯入購物訂單」貼上 GU／UNIQLO App 分享文字（含官方商品網址），按「解析分享文字並加入待確認清單」。
+- 本地解析名稱、商品編號、品牌及網址；不呼叫 Gemini。
+- 在待確認商品中確認顏色與尺寸，按「讀取官方商品照片」嘗試取得候選圖，再確認儲存。
+- 品牌官網可能限制讀取圖片；此功能不保證每個商品都有照片。
+- Cloudflare Worker 沿用 v0.3.6.0，無需重新部署或更動 Placement。
