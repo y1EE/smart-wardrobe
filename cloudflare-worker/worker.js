@@ -17,6 +17,49 @@ export default {async fetch(request,env){
  }
  if(!allowed||origin!==allowed)return new Response('Origin not allowed',{status:403});
  if(request.method==='OPTIONS')return new Response(null,{status:204,headers:cors});
+ if(request.method==='POST'&&url.pathname==='/official-photo'){
+  let input;try{input=await request.json()}catch{return reply({error:'無效 JSON'},400)}
+  const brand=String(input.brand||'').toUpperCase();if(!['GU','UNIQLO'].includes(brand))return reply({message:'目前僅支援 GU／UNIQLO 官方網站'});
+  const sku=String(input.sku||'').replace(/[^0-9]/g,'').slice(0,12);
+  const raw=String(input.productUrl||'').trim();
+  const allowedHost=brand==='GU'?'gu-global.com':'uniqlo.com';
+  const validHost=h=>h===allowedHost||h.endsWith('.'+allowedHost);
+  // Only official HTTPS pages. Do not proxy arbitrary URLs or fetch redirects to third parties.
+  async function metadata(page){
+   let u;try{u=new URL(page)}catch{return null}
+   if(u.protocol!=='https:'||!validHost(u.hostname))return null;
+   const r=await fetch(u.toString(),{redirect:'manual',headers:{'Accept':'text/html','User-Agent':'Mozilla/5.0 (compatible; SmartWardrobe/0.3.6)'}});
+   if(!r.ok||!String(r.headers.get('content-type')||'').includes('text/html'))return null;
+   const html=(await r.text()).slice(0,850000);
+   const get=(key)=>{const escaped=key;const patterns=[new RegExp('<meta[^>]+(?:property|name)=["\']'+escaped+'["\'][^>]+content=["\']([^"\']+)', 'i'),new RegExp('<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']'+escaped+'["\']','i')];for(const re of patterns){const m=html.match(re);if(m)return m[1].replace(/&amp;/g,'&')}return ''};
+   const image=get('og:image')||get('twitter:image'),title=get('og:title')||get('twitter:title');
+   if(!image)return null;let img;try{img=new URL(image,u)}catch{return null}
+   // Only return HTTPS official/CDN image URLs; browser verifies and user approves image.
+   if(img.protocol!=='https:'||!(/(^|\.)(uniqlo\.com|gu-global\.com|fastretailing\.com|uniqlo\.jp|gu-global\.jp)$/.test(img.hostname)))return null;
+   return {imageUrl:img.toString(),productUrl:u.toString(),title,source:'official-page'};
+  }
+  if(raw){let u;try{u=new URL(raw)}catch{return reply({error:'商品頁網址格式不正確'},400)}
+   if(u.protocol!=='https:'||!validHost(u.hostname))return reply({error:'請使用所選品牌的官方 HTTPS 商品頁網址'},400);
+   const m=await metadata(u.toString());return reply(m||{message:'官方頁面沒有可讀取的商品照片，可能已下架或禁止自動讀取'});
+  }
+  if(!sku)return reply({message:'未辨識到商品編號，請開啟官方搜尋並貼上商品頁網址'});
+  // Official storefront search pages vary by region; these are candidates, not guaranteed product URLs.
+  const candidates=brand==='GU'?[`https://www.gu-global.com/tw/zh_TW/search?q=${sku}`]:[`https://www.uniqlo.com/tw/zh_TW/search?q=${sku}`];
+  for(const page of candidates){
+   try{
+    const r=await fetch(page,{redirect:'manual',headers:{'Accept':'text/html'}});
+    if(!r.ok||!String(r.headers.get('content-type')||'').includes('text/html'))continue;
+    const html=(await r.text()).slice(0,850000);
+    const links=[...html.matchAll(/href=["']([^"']+)["']/gi)].map(m=>m[1].replace(/&amp;/g,'&'));
+    for(const link of links.slice(0,350)){
+     let u;try{u=new URL(link,page)}catch{continue}
+     if(!validHost(u.hostname)||!u.pathname.includes(sku)||!/product|goods|item/i.test(u.pathname))continue;
+     const m=await metadata(u.toString());if(m)return reply(m);
+    }
+   }catch{}
+  }
+  return reply({message:'未能自動確認相同商品編號的官方照片。請按「開啟官方搜尋」，找到商品頁後貼入網址再讀取。'});
+ }
  if(request.method!=='POST'||new URL(request.url).pathname!=='/analyze')return reply({error:'Not found'},404);
  if(!env.GEMINI_API_KEY)return reply({error:'請先設定 GEMINI_API_KEY Secret'},503);
  const length=Number(request.headers.get('content-length')||0);if(length>6_000_000)return reply({error:'圖片過大'},413);

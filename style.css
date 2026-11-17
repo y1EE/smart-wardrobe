@@ -56,3 +56,6 @@ input[hidden]{display:none!important}
 .portrait-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:16px}
 .portrait-actions .actions{margin-top:0}
 .portrait-inner canvas{border:2px solid #b5c7d7;box-sizing:border-box}
+
+/* v0.3.6 official product photo confirmation */
+.official-photo-panel{border:1px solid #dce4e7;border-radius:12px;padding:10px;margin:12px 0;background:#f8fafb}.order-photo-row{display:flex;align-items:center;gap:12px}.order-photo-empty{display:flex;align-items:center;justify-content:center;text-align:center;width:90px;height:105px;flex:none;border:1px dashed #b6c5cf;border-radius:8px;background:#fff;color:#647586;font-size:12px;padding:7px;box-sizing:border-box}.order-photo-actions{display:flex;flex-direction:column;align-items:flex-start;gap:7px;min-width:0}.official-link{color:#315a7b;text-decoration:underline;font-size:13px}.official-status{white-space:pre-wrap}.order-thumb{flex:none}.order-photo-actions small{line-height:1.4}
