@@ -1,9 +1,4 @@
-# Smart Wardrobe v0.3.3
+const CACHE='smart-wardrobe-v0342-20261117';const ASSETS=['./','./index.html','./style.css','./app.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png'];self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)));self.skipWaiting()});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));self.clients.claim()});self.addEventListener('fetch',e=>{if(e.request.method!=='GET'||new URL(e.request.url).origin!==self.location.origin)return;e.respondWith(fetch(e.request).then(r=>{if(r.ok){let copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy))}return r}).catch(()=>caches.match(e.request)))})
 
-在 v0.3.2 基礎上更新個人檔案：照片與五項基本資料維持上方緊湊雙欄；喜好風格、穿著限制、穿搭偏好改為下方三個全寬區塊。
 
-編輯模式增加多項預設選項，三類皆可勾選「其他（自行輸入）」，以頓號、逗號或分號分隔多個自訂項目。已儲存的自訂項目可重新編輯。照片變更時保留目前表單選擇。
-
-沿用 IndexedDB 的 studio/profile 資料結構，原 JSON 匯出包含個人資料與照片。更新前仍建議匯出 JSON 備份。
-
-部署：解壓縮後將所有檔案覆蓋 GitHub Pages 專案。iOS PWA 更新後若仍顯示舊版，關閉後重開。
+v0.3.4.2：設定 > 個人檔案 > 編輯 > 更換照片／調整照片，支援拖曳、雙指縮放、滑桿縮放與方形裁切。裁切後只存本機 IndexedDB，保留 v0.3.4.1 天氣優化及訂單匯入。
