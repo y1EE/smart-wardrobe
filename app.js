@@ -95,35 +95,43 @@ function readProfileForm(form){const fd=new FormData(form),next={...profile};for
  next[k]=[...new Set([...standard,...custom])];
  }return next;}
 function profileGroup(title,name,options,chosen,editing){return `<div class="profile-group"><strong>${title}</strong>${editing?profileOptions(name,options,chosen):`<div class="profile-tags">${profileChips(chosen)}</div>`}</div>`;}
-function profileHTML(){const p=profile;const photo=`<div class="profile-photo-area"><div class="profile-photo">${p.photo?`<img src="${p.photo}" alt="個人照片">`:'<span aria-hidden="true">♙</span>'}</div>${profileEditing?`<label class="profile-upload">更換照片<input id="profilePhotoInput" type="file" accept="image/*" hidden></label>${p.photo?'<button type="button" class="small-btn secondary" id="profileAdjustPhoto">調整照片</button><button type="button" class="small-btn secondary" id="profileRemovePhoto">移除照片</button>':''}`:'<span class="muted">個人照片</span>'}</div>`;
+function profileHTML(){const p=profile;const photo=`<div class="profile-photo-area"><div class="profile-photo">${p.photo?`<img src="${p.photo}" alt="個人照片">`:'<span aria-hidden="true">♙</span>'}</div>${profileEditing?`<button type="button" class="small-btn secondary profile-edit-photo" id="profileAdjustPhoto">${p.photo?'編輯相片':'新增相片'}</button>`:'<span class="muted">個人照片</span>'}</div>`;
  const fields=profileEditing?`<div class="profile-fields"><label>身高（cm）<input name="height" type="number" min="80" max="230" step="0.1" value="${esc(p.height)}"></label><label>體重（kg）<input name="weight" type="number" min="10" max="300" step="0.1" value="${esc(p.weight)}"></label><label>腰圍（吋）<input name="waist" type="number" min="15" max="70" step="0.1" value="${esc(p.waist)}"></label><label>上衣尺寸<input name="topSize" maxlength="30" value="${esc(p.topSize)}"></label><label>外套尺寸<input name="coatSize" maxlength="30" value="${esc(p.coatSize)}"></label></div>`:`<div class="profile-summary"><div><span>身高</span><strong>${esc(p.height||'—')} cm</strong></div><div><span>體重</span><strong>${esc(p.weight||'—')} kg</strong></div><div><span>腰圍</span><strong>${esc(p.waist||'—')} 吋</strong></div><div><span>上衣</span><strong>${esc(p.topSize||'—')}</strong></div><div><span>外套</span><strong>${esc(p.coatSize||'—')}</strong></div></div>`;
  return `<div class="section-head"><h2>個人檔案</h2><button type="button" class="small-btn secondary" id="profileEditBtn">${profileEditing?'取消編輯':'編輯'}</button></div><section class="card profile-card">${profileEditing?'<form id="profileForm" class="profile-form">':''}<div class="profile-top">${photo}${fields}</div><div class="profile-lower">${profileGroup('喜好風格','styles',PROFILE_STYLES,p.styles,profileEditing)}${profileGroup('穿著限制','restrictions',PROFILE_RESTRICTIONS,p.restrictions,profileEditing)}${profileGroup('穿搭偏好','preferences',PROFILE_PREFERENCES,p.preferences,profileEditing)}</div>${profileEditing?'<button type="submit" class="profile-save">儲存個人設定</button><p class="notice">個人照片僅儲存在本機瀏覽器，不會上傳至 GitHub。</p></form>':''}</section>`;
 }
 async function saveProfile(){await put('studio',{id:'profile',...profile})}
-// Profile portrait editor: pan/zoom crop locally, including iPhone touch gestures.
+// Profile photo: one shared square viewport for touch preview and saved output.
 let portraitState=null;
+const portraitCanvas=$('#portraitCanvas'),portraitDialog=$('#portraitDialog');
 function openPortraitEditor(source){
- const dialog=$('#portraitDialog'),canvas=$('#portraitCanvas'),slider=$('#portraitZoom');
  const im=new Image();im.onload=()=>{
-  const size=360,base=Math.max(size/im.naturalWidth,size/im.naturalHeight);
+  const size=portraitCanvas.width,base=Math.max(size/im.naturalWidth,size/im.naturalHeight);
   portraitState={im,base,zoom:1,x:0,y:0,pointers:new Map(),lastDistance:0};
-  slider.value='1';drawPortrait();dialog.showModal();
+  drawPortrait();portraitDialog.showModal();
  };im.onerror=()=>alert('無法讀取這張照片');im.src=source;
 }
-function drawPortrait(){const st=portraitState;if(!st)return;const c=$('#portraitCanvas'),ctx=c.getContext('2d'),size=c.width;
+function drawPortrait(){const st=portraitState;if(!st)return;
+ const c=portraitCanvas,ctx=c.getContext('2d'),size=c.width;
  const w=st.im.naturalWidth*st.base*st.zoom,h=st.im.naturalHeight*st.base*st.zoom;
- st.x=Math.max(-(w-size)/2,Math.min((w-size)/2,st.x));st.y=Math.max(-(h-size)/2,Math.min((h-size)/2,st.y));
+ st.x=Math.max((size-w)/2,Math.min((w-size)/2,st.x));
+ st.y=Math.max((size-h)/2,Math.min((h-size)/2,st.y));
  ctx.clearRect(0,0,size,size);ctx.drawImage(st.im,(size-w)/2+st.x,(size-h)/2+st.y,w,h);
 }
-function setPortraitZoom(v){const st=portraitState;if(!st)return;st.zoom=Math.max(1,Math.min(4,Number(v)));$('#portraitZoom').value=String(st.zoom);drawPortrait()}
-async function profilePhotoFile(file){if(!file)return;try{const photo=await compressPhoto(file);openPortraitEditor(photo)}catch(err){alert('照片無法讀取：'+err.message)}}
-$('#portraitZoom').addEventListener('input',e=>setPortraitZoom(e.target.value));
-$('#portraitCanvas').addEventListener('pointerdown',e=>{if(!portraitState)return;e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);portraitState.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});portraitState.lastDistance=0});
-$('#portraitCanvas').addEventListener('pointermove',e=>{const st=portraitState;if(!st||!st.pointers.has(e.pointerId))return;e.preventDefault();const prev=st.pointers.get(e.pointerId);st.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});const points=[...st.pointers.values()];if(points.length===1){const rect=e.currentTarget.getBoundingClientRect();st.x+=(e.clientX-prev.x)*360/rect.width;st.y+=(e.clientY-prev.y)*360/rect.height;drawPortrait()}else if(points.length===2){const d=Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y);if(st.lastDistance)setPortraitZoom(st.zoom*d/st.lastDistance);st.lastDistance=d}});
-for(const name of ['pointerup','pointercancel','lostpointercapture'])$('#portraitCanvas').addEventListener(name,e=>{if(!portraitState)return;portraitState.pointers.delete(e.pointerId);portraitState.lastDistance=0});
-$('#portraitCanvas').addEventListener('wheel',e=>{e.preventDefault();if(portraitState)setPortraitZoom(portraitState.zoom*(e.deltaY>0?.94:1.06))},{passive:false});
-$('#portraitCancel').addEventListener('click',()=>{$('#portraitDialog').close();portraitState=null});
-$('#portraitSave').addEventListener('click',async()=>{if(!portraitState)return;try{const photo=$('#portraitCanvas').toDataURL('image/jpeg',.9);if(profileEditing){const f=$('#profileForm');if(f)profile=readProfileForm(f)}profile.photo=photo;await saveProfile();$('#portraitDialog').close();portraitState=null;render()}catch(err){alert('照片儲存失敗：'+err.message)}});
+function setPortraitZoom(v){if(!portraitState)return;portraitState.zoom=Math.max(1,Math.min(4,Number(v)));drawPortrait()}
+async function profilePhotoFile(file){if(!file)return;try{
+ const photo=await compressPhoto(file);if(profileEditing){const f=$('#profileForm');if(f)profile=readProfileForm(f)}
+ // Keep original photo locally so later edits can recover content outside the crop.
+ profile.photoOriginal=photo;openPortraitEditor(photo);
+ }catch(err){alert('照片無法讀取：'+err.message)}}
+$('#portraitReplace').addEventListener('click',()=>$('#portraitFileInput').click());
+$('#portraitFileInput').addEventListener('change',e=>{const file=e.target.files?.[0];e.target.value='';if(file)profilePhotoFile(file)});
+portraitCanvas.addEventListener('pointerdown',e=>{if(!portraitState)return;e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);portraitState.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});portraitState.lastDistance=0});
+portraitCanvas.addEventListener('pointermove',e=>{const st=portraitState;if(!st||!st.pointers.has(e.pointerId))return;e.preventDefault();const prev=st.pointers.get(e.pointerId);st.pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});const points=[...st.pointers.values()];if(points.length===1){const rect=e.currentTarget.getBoundingClientRect();st.x+=(e.clientX-prev.x)*360/rect.width;st.y+=(e.clientY-prev.y)*360/rect.height;drawPortrait()}else if(points.length===2){const d=Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y);if(st.lastDistance)setPortraitZoom(st.zoom*d/st.lastDistance);st.lastDistance=d}});
+for(const name of ['pointerup','pointercancel','lostpointercapture'])portraitCanvas.addEventListener(name,e=>{if(!portraitState)return;portraitState.pointers.delete(e.pointerId);portraitState.lastDistance=0});
+portraitCanvas.addEventListener('wheel',e=>{e.preventDefault();if(portraitState)setPortraitZoom(portraitState.zoom*(e.deltaY>0?.94:1.06))},{passive:false});
+$('#portraitCancel').addEventListener('click',()=>{portraitDialog.close();portraitState=null});
+$('#portraitRemove').addEventListener('click',async()=>{if(!confirm('確定移除個人照片？'))return;try{if(profileEditing){const f=$('#profileForm');if(f)profile=readProfileForm(f)}profile.photo=null;profile.photoOriginal=null;await saveProfile();portraitDialog.close();portraitState=null;render()}catch(err){alert('移除失敗：'+err.message)}});
+$('#portraitSave').addEventListener('click',async()=>{if(!portraitState)return;try{const photo=portraitCanvas.toDataURL('image/jpeg',.9);if(profileEditing){const f=$('#profileForm');if(f)profile=readProfileForm(f)}profile.photo=photo;await saveProfile();portraitDialog.close();portraitState=null;render()}catch(err){alert('照片儲存失敗：'+err.message)}});
 const WX_PREF='sw-weather-preferences-v1';
 const WX_CITIES={hsinchu:{lat:24.8138,lon:120.9675,name:'新竹市'},zhubei:{lat:24.8387,lon:121.0043,name:'竹北市'},taipei:{lat:25.033,lon:121.5654,name:'台北市'},taichung:{lat:24.1477,lon:120.6736,name:'台中市'}};
 function readWeatherPrefs(){try{const p=JSON.parse(localStorage.getItem(WX_PREF)||'{}');return {gps:p.gps===true,city:WX_CITIES[p.city]?p.city:'hsinchu',minutes:[30,60,120].includes(Number(p.minutes))?Number(p.minutes):60}}catch{return {gps:false,city:'hsinchu',minutes:60}}}
@@ -168,7 +176,7 @@ function editor(id){let x=items.find(v=>v.id===id),f=$('#itemForm');f.reset();fo
 async function compressPhoto(file){if(!file)return null;if(!file.type.startsWith('image/'))throw Error('請選擇圖片檔');if(file.size>15*1024*1024)throw Error('圖片請小於 15MB');let bitmap=await createImageBitmap(file);let scale=Math.min(1,1000/Math.max(bitmap.width,bitmap.height));let c=document.createElement('canvas');c.width=Math.max(1,Math.round(bitmap.width*scale));c.height=Math.max(1,Math.round(bitmap.height*scale));c.getContext('2d').drawImage(bitmap,0,0,c.width,c.height);bitmap.close();return c.toDataURL('image/jpeg',.78)}
 $('#itemForm').addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,fd=new FormData(f),id=String(fd.get('id')||uid()),old=items.find(x=>x.id===id);let data={...old,id};for(let k of ['name','category','color','style','season','status','notes'])data[k]=String(fd.get(k)||'').trim();if(!data.name)return;try{let file=$('#photoInput').files[0];if(file){data.photo=await compressPhoto(file);data.photoOriginal=data.photo;data.photoCutout=false;}await put(STORE,data);$('#editor').close();await load()}catch(err){alert('儲存失敗：'+err.message+'。可能是瀏覽器儲存空間不足。')}});
 $('#cancelEditor').onclick=()=>$('#editor').close();$('#photoInput').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{$('#photoPreview').src=await compressPhoto(f);$('#photoPreview').hidden=false}catch(err){alert(err.message)}};
-$('#app').addEventListener('click',async e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.page){page=b.dataset.page;render()}if('add'in b.dataset)editor();if('orderOpen'in b.dataset)openOrderImporter();if(b.dataset.edit)editor(b.dataset.edit);if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.delete&&confirm('確定刪除這件衣物？')){await del(STORE,b.dataset.delete);await load()}if(b.dataset.record){let ids=b.dataset.record.split(',');let date=new Date().toLocaleDateString('sv-SE');await put('history',{id:uid(),date,ids,names:ids.map(id=>items.find(x=>x.id===id)?.name||id)});alert('已記錄今天的穿搭！')}if(b.dataset.delrecord&&confirm('刪除這筆紀錄？')){await del('history',b.dataset.delrecord);renderHistory()}if(b.dataset.aiCutout){await aiCutoutItem(b.dataset.aiCutout)}if(b.dataset.cutout){await cutoutItem(b.dataset.cutout)}if(b.dataset.restore){await restoreItem(b.dataset.restore)}if(b.dataset.studioAdd){studioAdd(b.dataset.studioAdd)}if(b.dataset.studioSelect){studioActive=b.dataset.studioSelect;render()}if(b.dataset.studioRemove){studioRemove(b.dataset.studioRemove)}if(b.id==='studioSave')await saveStudioOutfit();if(b.id==='studioClear'&&confirm('清空目前疊加的衣物？')){studioLayers=[];studioActive=null;saveStudioDraft();render()}if(b.id==='studioAvatarClear'&&confirm('移除本機全身照片？')){studioAvatar=null;await del('studio','avatar');render()}if(b.id==='profileEditBtn'){profileEditing=!profileEditing;render()}if(b.id==='profileAdjustPhoto'&&profile.photo)openPortraitEditor(profile.photo);if(b.id==='profileRemovePhoto'){const f=$('#profileForm');if(profileEditing&&f)profile=readProfileForm(f);profile.photo=null;await saveProfile();render()}if(b.id==='exportBtn')await exportData();if(b.id==='importBtn')$('#importFile').click()});
+$('#app').addEventListener('click',async e=>{let b=e.target.closest('button');if(!b)return;if(b.dataset.page){page=b.dataset.page;render()}if('add'in b.dataset)editor();if('orderOpen'in b.dataset)openOrderImporter();if(b.dataset.edit)editor(b.dataset.edit);if(b.dataset.filter){filter=b.dataset.filter;render()}if(b.dataset.delete&&confirm('確定刪除這件衣物？')){await del(STORE,b.dataset.delete);await load()}if(b.dataset.record){let ids=b.dataset.record.split(',');let date=new Date().toLocaleDateString('sv-SE');await put('history',{id:uid(),date,ids,names:ids.map(id=>items.find(x=>x.id===id)?.name||id)});alert('已記錄今天的穿搭！')}if(b.dataset.delrecord&&confirm('刪除這筆紀錄？')){await del('history',b.dataset.delrecord);renderHistory()}if(b.dataset.aiCutout){await aiCutoutItem(b.dataset.aiCutout)}if(b.dataset.cutout){await cutoutItem(b.dataset.cutout)}if(b.dataset.restore){await restoreItem(b.dataset.restore)}if(b.dataset.studioAdd){studioAdd(b.dataset.studioAdd)}if(b.dataset.studioSelect){studioActive=b.dataset.studioSelect;render()}if(b.dataset.studioRemove){studioRemove(b.dataset.studioRemove)}if(b.id==='studioSave')await saveStudioOutfit();if(b.id==='studioClear'&&confirm('清空目前疊加的衣物？')){studioLayers=[];studioActive=null;saveStudioDraft();render()}if(b.id==='studioAvatarClear'&&confirm('移除本機全身照片？')){studioAvatar=null;await del('studio','avatar');render()}if(b.id==='profileEditBtn'){profileEditing=!profileEditing;render()}if(b.id==='profileAdjustPhoto'){if(profile.photo)openPortraitEditor(profile.photoOriginal||profile.photo);else $('#portraitFileInput').click()}if(b.id==='exportBtn')await exportData();if(b.id==='importBtn')$('#importFile').click()});
 $('#app').addEventListener('change',e=>{if(e.target.dataset.otherToggle){const input=$('#profileForm')?.querySelector(`[data-other-input="${e.target.dataset.otherToggle}"]`);if(input){input.disabled=!e.target.checked;if(e.target.checked)input.focus()}return}if(e.target.id==='profilePhotoInput'){profilePhotoFile(e.target.files[0]);return}if(e.target.id==='wishlistToggle'){showWishlist=e.target.checked;render()}if(e.target.id==='studioCategory'){studioCategory=e.target.value;render()}if(e.target.id==='studioAvatarFile'){setStudioAvatar(e.target.files[0])}if(e.target.id==='seasonSelect'){localStorage.setItem('sw-season',e.target.value);render()}if(e.target.id==='weatherGpsToggle'){weatherPrefs.gps=e.target.checked;saveWeatherPrefs();render()}if(e.target.id==='weatherCity'){weatherPrefs.city=e.target.value;saveWeatherPrefs()}if(e.target.id==='weatherInterval'){weatherPrefs.minutes=Number(e.target.value);saveWeatherPrefs()}});document.querySelector('.bottom').addEventListener('click',e=>{let b=e.target.closest('[data-page]');if(b){page=b.dataset.page;render()}});
 async function exportData(){let data={format:'smart-wardrobe-v0.1',exportedAt:new Date().toISOString(),items:await all(STORE),history:await all('history'),studio:await all('studio')};let blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='smart-wardrobe-backup-'+new Date().toLocaleDateString('sv-SE')+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000)}
 $('#app').addEventListener('submit',async e=>{if(e.target.id!=='profileForm')return;e.preventDefault();const form=e.target,next=readProfileForm(form);for(const k of ['height','weight','waist']){if(next[k]&&(!Number.isFinite(Number(next[k]))||Number(next[k])<=0)){alert('請輸入正確的身高、體重與腰圍');return}}for(const k of ['styles','restrictions','preferences']){if(next[k].some(x=>x.length>60)){alert('自訂選項請勿超過 60 字');return}}try{profile=next;await saveProfile();profileEditing=false;render()}catch(err){alert('儲存失敗：'+err.message)}});
@@ -259,38 +267,97 @@ async function aiCutoutItem(id){
 // v0.3.4 訂單截圖匯入：OCR 只在使用者操作時下載至瀏覽器執行；不連接購物帳號。
 const orderBrands=['UNIQLO','GU','其他'];
 function orderCategory(name){if(/購物袋|Shopping Bag|洗沐|洗髮|贈品|試用品/.test(name))return '排除';if(/內褲|內衣|胸罩|BRA|AIRism.*內褲/.test(name))return '排除';if(/襪|褲襪/.test(name))return '襪子／褲襪';if(/腰帶|皮帶/.test(name))return '其他配件';if(/外套|夾克|大衣|罩衫/.test(name))return '外套';if(/連身裙|洋裝/.test(name))return '洋裝';if(/裙/.test(name))return '裙裝';if(/褲|牛仔/.test(name))return '褲裝';if(/鞋/.test(name))return '鞋子';if(/帽/.test(name))return '帽子';return '上衣'}
-function normalizeOrderText(text){return String(text||'').replace(/\r/g,'').replace(/[：﹕]/g,':').replace(/[（]/g,'(').replace(/[）]/g,')')}
+function normalizeOrderText(text){return String(text||'').replace(/\r/g,'').replace(/[：﹕]/g,':').replace(/[（]/g,'(').replace(/[）]/g,')').replace(/\u00a0/g,' ')}
+function orderClean(line){return line.replace(/(?<=[\p{Script=Han}])\s+(?=[\p{Script=Han}])/gu,'').replace(/\s+/g,' ').trim()}
+function orderNameCandidate(line){
+ let t=orderClean(line).replace(/^[^\p{Script=Han}A-Za-z]+/u,'').replace(/^(?:女裝|男裝|童裝)\s*/,'').trim();
+ t=t.replace(/(?:\s*(?:MN|UL|CL\+E)\s*)?\b\d{6}\b.*$/i,'').replace(/\s*[\[【][^\]】]*$/,'').replace(/\s+(?:UL|CL\+E|MN)$/i,'').trim();
+ if(/^(?:商品|訂單|顏色|尺寸|購物|總金額|新竹|台南|新光|遠東|南紡|訂單編號|商品詳情|贈品|NT\$|NTS|時間|商品圖片)/.test(t))return '';
+ const hasGarment=/(?:上衣|外套|連帽|拉鍊|腰帶|皮帶|襪|牛仔|襯衫|連身裙|洋裝|短裙|長裙|褲|T恤|針織|內褲|內衣|背心|帽|鞋|罩衫|大衣|夾克|毛衣|開襟|AIRism|Fine gauge|Shopping Bag|洗沐組|洗髮)/i.test(t);
+ if(!hasGarment||t.length<3||t.length>90)return '';
+ return t.replace(/[\s|=—]+$/,'').trim();
+}
 function parseOrderText(text,brand='GU'){
- const lines=normalizeOrderText(text).split('\n').map(x=>x.trim()).filter(Boolean);const found=[];let current=null,orderId='',date='';
- const commit=()=>{if(current&&current.name){current.category=orderCategory(current.name);found.push(current)}current=null};
- for(let raw of lines){let line=raw.replace(/\s+/g,' ').trim();let m=line.match(/訂單編號\s*[:：]?\s*(\d{7,15})/);if(m){commit();orderId=m[1];continue}m=line.match(/(20\d\d)[-/.](\d\d)[-/.](\d\d)/);if(m)date=`${m[1]}-${m[2]}-${m[3]}`;
-  if(/^(商品詳情|商品圖片僅供參考|訂單總金額|填寫評論|請輸入店鋪名稱|店鋪|訂單編號|尺寸\s*:|顏色\s*:|NT\$|x\s*\d+|贈品)$/i.test(line)){
-   if(current){if(/^尺寸/.test(line))current.size=line.split(':').slice(1).join(':').trim();if(/^顏色/.test(line))current.color=line.split(':').slice(1).join(':').trim();if(/^NT\$/.test(line))current.price=Number(line.replace(/[^\d]/g,''))||null;}continue;
-  }
-  // 網路訂單：以「女裝」「男裝」或商品名稱作為起點；門市清單可從商品名稱辨識。
-  const isName=/^(女裝|男裝|童裝|AIRism|植鞣|Shopping Bag|艾瑪絲)/i.test(line)&&!/^女裝\s*(?:內|外)衣尺寸/.test(line);
-  if(isName){commit();current={name:line,brand,orderId,date,color:'',size:'',sku:'',price:null,quantity:1,category:'上衣',photo:null,include:true};let sku=line.match(/(?:MN\s*)?(\d{6})(?!\d)/);if(sku)current.sku=sku[1];continue}
+ const lines=normalizeOrderText(text).split('\n').map(orderClean).filter(Boolean),found=[];
+ let current=null,orderId='',date='';
+ const commit=()=>{if(current&&current.name){current.category=orderCategory(current.name);current.include=current.category!=='排除';found.push(current)}current=null};
+ const setSku=(x,str)=>{let m=str.match(/\b(\d{6})\b/);if(m)x.sku=m[1]};
+ const setColorSize=(x,str)=>{let t=str.replace(/^.*?(?:顏色|色)\s*:/,'').replace(/^[\s\/=\-]+/,'').trim();let size=t.match(/\b(ONE\s*SIZE|XXS|XXL|XS|XL|S|M|L)\b/i);if(size){x.size=size[1].toUpperCase().replace(/\s+/g,' ');t=t.replace(size[0],'').trim()}let color=t.match(/(?:\b\d{2}\s*)?\b(NATURAL|NAVY|BLUE|BLACK|WHITE|DARK\s*GRAY|GRAY|GREY|BEIGE|PINK|GREEN|BROWN|OTHER|RED|YELLOW|OLIVE|PURPLE)\b/i);if(color)x.color=color[0].trim().toUpperCase()};
+ for(let i=0;i<lines.length;i++){
+  const line=lines[i];if(/^商品詳情$/.test(line)){commit();orderId='';date='';continue}let m=line.match(/訂單\s*編號\s*:?\s*(\d{7,15})/);if(m){commit();orderId=m[1];date='';continue}
+  m=line.match(/(20\d\d)[-/.](\d\d)[-/.](\d\d)/);if(m){date=`${m[1]}-${m[2]}-${m[3]}`;if(current)current.date=date}
+  const name=orderNameCandidate(line);
+  if(name){commit();current={name,brand,orderId,date,color:'',size:'',sku:'',price:null,quantity:1,category:'上衣',photo:null,include:true};setSku(current,line);continue}
   if(!current)continue;
-  if(/^顏色\s*:/.test(line)){current.color=line.split(':').slice(1).join(':').trim();continue}
-  if(/^尺寸\s*:/.test(line)){current.size=line.split(':').slice(1).join(':').trim();continue}
-  if(/^NT\$\s*[\d,]+/.test(line)){current.price=Number(line.replace(/[^\d]/g,''))||null;continue}
-  if(/^x\s*\d+/i.test(line)){current.quantity=Number(line.match(/\d+/)?.[0]||1);continue}
-  const sku=line.match(/\b(\d{6})\b/);if(sku){current.sku=sku[1];let rest=line.replace(sku[1],'').replace(/[\/]/g,' ').trim();const size=rest.match(/\b(ONE SIZE|XXL|XL|XS|XXS|S|M|L)\b/i);if(size)current.size=size[1].toUpperCase();rest=rest.replace(/\b(ONE SIZE|XXL|XL|XS|XXS|S|M|L)\b/ig,'').trim();if(rest)current.color=rest;continue}
-  if(/^(\d{2}\s+)?(NATURAL|NAVY|BLUE|BLACK|WHITE|DARK GRAY|GRAY|GREY|BEIGE|PINK|GREEN|BROWN|Other)/i.test(line)){let size=line.match(/\b(ONE SIZE|XXL|XL|XS|XXS|S|M|L)\b/i);if(size)current.size=size[1].toUpperCase();current.color=line.replace(/\b(ONE SIZE|XXL|XL|XS|XXS|S|M|L)\b/ig,'').trim();continue}
-  if(/^[\p{L}\p{N}\s()（）\-]+$/u.test(line)&&!/^\d+$/.test(line)&&!current.color&&line.length<55&&!/^[\d\s]+$/.test(line))current.name+=' '+line;
+  if(/(?:訂單總金額|訂單\s*總\s*金額)/.test(line)){commit();continue}
+  if(/(?:^|\s)顏色\s*:/.test(line)){setColorSize(current,line);continue}
+  if(/(?:^|\s)尺寸\s*:/.test(line)){let v=line.split(':').slice(1).join(':').match(/\b(ONE\s*SIZE|XXS|XXL|XS|XL|S|M|L)\b/i);if(v)current.size=v[1].toUpperCase();continue}
+  if(/^NT\s*\$\s*[\d,]+/i.test(line)){current.price=Number(line.replace(/[^\d]/g,''))||null;continue}
+  if(/^[xX×]\s*\d+/.test(line)){current.quantity=Number(line.match(/\d+/)?.[0]||1);continue}
+  if(/\b\d{6}\b/.test(line)){setSku(current,line);setColorSize(current,line);continue}
+  if(/\b(?:NATURAL|NAVY|BLUE|BLACK|WHITE|GRAY|GREY|BEIGE|PINK|GREEN|BROWN|OTHER)\b/i.test(line)){setColorSize(current,line);continue}
+  if(!current.sku&&/^(?:MN|UL|CL\+E)?\s*\d{6}$/.test(line))setSku(current,line);
  }
- commit();return found.map(x=>({...x,category:orderCategory(x.name),include:orderCategory(x.name)!=='排除'}));
+ commit();return found;
 }
 function orderKey(x){return [x.brand||'',x.orderId||'',x.sku||'',x.name.trim().toLowerCase(),x.color.trim().toLowerCase(),x.size.trim().toLowerCase()].join('|')}
 function orderMerge(incoming){for(const x of incoming){let old=orderDraft.find(y=>orderKey(y)===orderKey(x));if(old){old.quantity=Math.max(old.quantity,x.quantity||1);continue}orderDraft.push(x)}renderOrderDraft()}
-function openOrderImporter(){orderDraft=[];orderOCRStatus='';const dlg=$('#orderDialog');dlg.showModal();renderOrderDraft()}
+function openOrderImporter(){orderDraft=[];orderOCRStatus='';const dlg=$('#orderDialog');dlg.showModal();$('#geminiWorkerUrl').value=localStorage.getItem('sw-gemini-worker')||'';$('#geminiStatus').textContent='';renderOrderDraft()}
 function renderOrderDraft(){const area=$('#orderResults');if(!area)return;$('#orderOCRStatus').textContent=orderOCRStatus;area.innerHTML=orderDraft.map((x,i)=>`<div class="order-entry" data-order-index="${i}"><div class="order-entry-head"><label><input type="checkbox" data-order-field="include" ${x.include?'checked':''}> 匯入這件</label><span class="muted">${esc(x.orderId?'訂單末四碼 '+x.orderId.slice(-4):'訂單編號未辨識')}</span></div><label>名稱<input data-order-field="name" value="${esc(x.name)}"></label><div class="order-two"><label>品牌<select data-order-field="brand">${orderBrands.map(b=>`<option ${b===x.brand?'selected':''}>${b}</option>`).join('')}</select></label><label>分類<select data-order-field="category">${[...studioCategories,'排除'].map(c=>`<option ${c===x.category?'selected':''}>${c}</option>`).join('')}</select></label></div><div class="order-two"><label>商品編號<input data-order-field="sku" value="${esc(x.sku)}"></label><label>顏色<input data-order-field="color" value="${esc(x.color)}"></label></div><div class="order-two"><label>尺寸<input data-order-field="size" value="${esc(x.size)}"></label><label>單價 NT$<input type="number" min="0" data-order-field="price" value="${x.price??''}" placeholder="未提供"></label></div><label>照片（建議使用純衣物照）<input type="file" accept="image/*" data-order-photo></label>${x.photo?`<img class="order-thumb" src="${x.photo}" alt="已選商品照片">`:''}<button type="button" class="secondary small-btn" data-order-remove="${i}">移除此項</button></div>`).join('')||'<p class="muted">尚無辨識結果。可上傳截圖進行辨識，或貼上訂單文字後分析。</p>';$('#orderSaveBtn').textContent=`確認加入衣櫃（${orderDraft.filter(x=>x.include&&x.category!=='排除').length} 件）`}
 function orderScript(){return new Promise((res,rej)=>{if(window.Tesseract)return res();let script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';script.onload=res;script.onerror=()=>rej(Error('無法下載 OCR 程式，請檢查網路連線'));document.head.appendChild(script)})}
 async function orderOCR(files){if(orderOCRBusy)return;orderOCRBusy=true;$('#orderOCRBtn').disabled=true;try{await orderScript();orderOCRStatus='載入繁體中文辨識模型中，首次使用可能需要一些時間…';renderOrderDraft();const worker=await Tesseract.createWorker('chi_tra+eng',1,{logger:m=>{if(m.status){orderOCRStatus=`辨識中：${m.status} ${m.progress?Math.round(m.progress*100)+'%':''}`;$('#orderOCRStatus').textContent=orderOCRStatus}}});try{for(let i=0;i<files.length;i++){orderOCRStatus=`正在辨識第 ${i+1} / ${files.length} 張截圖…`;renderOrderDraft();let result=await worker.recognize(files[i]);let raw=result.data.text;$('#orderText').value+=($('#orderText').value?'\n':'')+raw;orderMerge(parseOrderText(raw,$('#orderBrand').value))}}finally{await worker.terminate()}orderOCRStatus='辨識完成。請逐項確認資料，漏辨識時可直接修改文字或手動新增。'}catch(err){orderOCRStatus='辨識未完成：'+err.message+'。可改用「貼上文字分析」或手動新增。'}finally{orderOCRBusy=false;$('#orderOCRBtn').disabled=false;renderOrderDraft()}}
 $('#orderOCRBtn').addEventListener('click',()=>{let f=$('#orderImages').files;if(!f.length)return alert('請先選擇訂單截圖');orderOCR([...f])});
-$('#orderParseBtn').addEventListener('click',()=>{let text=$('#orderText').value.trim();if(!text)return alert('請先貼上訂單文字');let parsed=parseOrderText(text,$('#orderBrand').value);if(!parsed.length)return alert('未辨識到商品名稱，請使用手動新增');orderMerge(parsed)});
+$('#orderParseBtn').addEventListener('click',()=>{let text=$('#orderText').value.trim();if(!text)return alert('請先貼上訂單文字');let parsed=parseOrderText(text,$('#orderBrand').value);if(!parsed.length)return alert('未辨識到商品名稱。請確認文字內容，或使用手動新增。');orderMerge(parsed)});
 $('#orderAddBtn').addEventListener('click',()=>{orderDraft.push({name:'',brand:$('#orderBrand').value,orderId:'',date:'',color:'',size:'',sku:'',price:null,quantity:1,category:'上衣',photo:null,include:true});renderOrderDraft()});
 $('#orderResults').addEventListener('input',e=>{let parent=e.target.closest('[data-order-index]');if(!parent)return;let x=orderDraft[Number(parent.dataset.orderIndex)],field=e.target.dataset.orderField;if(!field)return;x[field]=field==='include'?e.target.checked:field==='price'?(e.target.value===''?null:Number(e.target.value)):e.target.value;$('#orderSaveBtn').textContent=`確認加入衣櫃（${orderDraft.filter(x=>x.include&&x.category!=='排除').length} 件）`});
 $('#orderResults').addEventListener('change',async e=>{let parent=e.target.closest('[data-order-index]');if(!parent)return;let x=orderDraft[Number(parent.dataset.orderIndex)];if(e.target.matches('[data-order-photo]')){let file=e.target.files[0];if(file){x.photo=await compressPhoto(file);renderOrderDraft()}}else if(e.target.dataset.orderField){let field=e.target.dataset.orderField;x[field]=field==='include'?e.target.checked:e.target.value;$('#orderSaveBtn').textContent=`確認加入衣櫃（${orderDraft.filter(x=>x.include&&x.category!=='排除').length} 件）`}});
 $('#orderResults').addEventListener('click',e=>{let b=e.target.closest('[data-order-remove]');if(!b)return;orderDraft.splice(Number(b.dataset.orderRemove),1);renderOrderDraft()});
 $('#orderSaveBtn').addEventListener('click',async()=>{const selected=orderDraft.filter(x=>x.include&&x.category!=='排除'&&x.name.trim());if(!selected.length)return alert('請先選擇至少一件衣物');let added=0,duplicate=0;try{for(const x of selected){const key=orderKey(x);if(items.some(it=>it.importKey===key)){duplicate++;continue}const item={id:uid(),name:x.name.trim(),category:x.category,color:x.color,style:'',season:'all',status:'owned',notes:[x.brand,x.sku?'商品編號 '+x.sku:'',x.size?'尺寸 '+x.size:'',x.price!=null?'購入價 NT$'+x.price:'',x.date?'購入日期 '+x.date:''].filter(Boolean).join(' · '),brand:x.brand,sku:x.sku,size:x.size,price:x.price,orderDate:x.date,importKey:key};if(x.photo){item.photo=x.photo;item.photoOriginal=x.photo;item.photoCutout=false}await put(STORE,item);items.push(item);added++}$('#orderDialog').close();await load();alert(`匯入完成：新增 ${added} 件，略過重複 ${duplicate} 件。`)}catch(err){await load();alert('部分匯入失敗：'+err.message)}});
+
+
+// v0.3.5.0: Gemini vision via private Cloudflare Worker; never place API key in the frontend.
+function geminiNormalize(x,brand){
+ const name=String(x.name||'').trim().slice(0,100),category=studioCategories.includes(x.category)?x.category:orderCategory(name);
+ return {name,brand:orderBrands.includes(x.brand)?x.brand:brand,orderId:String(x.orderId||'').replace(/\D/g,'').slice(0,20),date:String(x.date||'').slice(0,10),color:String(x.color||'').slice(0,60),size:String(x.size||'').slice(0,30),sku:String(x.sku||'').replace(/[^\dA-Za-z-]/g,'').slice(0,30),price:Number.isFinite(Number(x.price))&&x.price!==null&&x.price!==''?Number(x.price):null,quantity:Math.min(10,Math.max(1,Number(x.quantity)||1)),category,photo:null,include:true,confidence:Number(x.confidence)||0,exclude:!!x.exclude};
+}
+function geminiIsDuplicate(x){
+ const key=orderKey(x);return items.some(it=>it.importKey===key || (x.sku&&it.sku===x.sku&&it.brand===x.brand&&String(it.color||'').toUpperCase()===x.color.toUpperCase()&&String(it.size||'').toUpperCase()===x.size.toUpperCase()));
+}
+function geminiSafeAuto(x){return x.name.length>=3&&x.confidence>=0.85&&!x.exclude&&x.category!=='排除'&&!!(x.sku||x.orderId)&&!!x.color&&!!x.size&&x.quantity===1&&!geminiIsDuplicate(x)}
+async function geminiImage(file){
+ if(!file.type.startsWith('image/'))throw Error('只接受圖片檔案');
+ const bitmap=await createImageBitmap(file);const scale=Math.min(1,1600/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement('canvas');canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close?.();return canvas.toDataURL('image/jpeg',0.82).split(',')[1];
+}
+async function geminiSave(x){
+ const item={id:uid(),name:x.name,category:x.category,color:x.color,style:'',season:'all',status:'owned',notes:[x.brand,x.sku?'商品編號 '+x.sku:'',x.size?'尺寸 '+x.size:'',x.price!==null?'購入價 NT$'+x.price:'',x.date?'購入日期 '+x.date:''].filter(Boolean).join(' · '),brand:x.brand,sku:x.sku,size:x.size,price:x.price,orderDate:x.date,importKey:orderKey(x),aiImportedAt:new Date().toISOString()};await put(STORE,item);items.push(item);return item.id;
+}
+$('#geminiImportBtn').addEventListener('click',async()=>{
+ const btn=$('#geminiImportBtn'),status=$('#geminiStatus'),files=[...$('#orderImages').files],url=$('#geminiWorkerUrl').value.trim().replace(/\/+$/,'');
+ if(!/^https:\/\/[a-z0-9.-]+(?:\:[0-9]+)?(?:\/[^?#]*)?$/i.test(url))return alert('請輸入 Cloudflare Worker 的 HTTPS 網址');
+ if(!files.length)return alert('請先選擇訂單截圖');if(files.length>8)return alert('每次最多匯入 8 張截圖');
+ localStorage.setItem('sw-gemini-worker',url);btn.disabled=true;const added=[];let pending=0,skipped=0;
+ try{
+  for(let i=0;i<files.length;i++){
+   status.textContent=`Gemini 分析中：${i+1}/${files.length} 張…`;const base64=await geminiImage(files[i]);
+   const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),45000);let response;
+   try{response=await fetch(url+'/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:base64,mimeType:'image/jpeg',brand:$('#orderBrand').value}),signal:ctrl.signal})}finally{clearTimeout(timer)}
+   const payload=await response.json().catch(()=>({error:'Worker 回傳格式錯誤'}));if(!response.ok)throw Error(payload.error||`HTTP ${response.status}`);
+   if(!Array.isArray(payload.items))throw Error('AI 未回傳商品陣列');
+   for(const raw of payload.items.slice(0,40)){
+    const x=geminiNormalize(raw,$('#orderBrand').value);if(!x.name||x.exclude||x.category==='排除'){skipped++;continue}
+    if(geminiIsDuplicate(x)||added.some(a=>a.key===orderKey(x))){skipped++;continue}
+    if(geminiSafeAuto(x)){const id=await geminiSave(x);added.push({id,key:orderKey(x)})}
+    else{if(!orderDraft.some(y=>orderKey(y)===orderKey(x))){x.include=true;orderDraft.push(x);pending++}}
+   }
+  }
+  localStorage.setItem('sw-gemini-last-import',JSON.stringify(added.map(a=>a.id)));
+  await load();renderOrderDraft();status.textContent=`完成：自動新增 ${added.length} 件，待確認 ${pending} 件，略過 ${skipped} 件。`;
+  alert(status.textContent+(pending?'\n待確認商品請在下方檢查後手動加入。':''));
+ }catch(err){localStorage.setItem('sw-gemini-last-import',JSON.stringify(added.map(a=>a.id)));await load();renderOrderDraft();status.textContent='AI 匯入中斷：'+err.message+`（已新增 ${added.length} 件）`;}
+ finally{btn.disabled=false}
+});
+$('#geminiUndoBtn').addEventListener('click',async()=>{
+ const ids=JSON.parse(localStorage.getItem('sw-gemini-last-import')||'[]');if(!ids.length)return alert('沒有可復原的 AI 匯入紀錄');
+ if(!confirm(`確定移除上一次 AI 自動新增的 ${ids.length} 件衣物？`))return;
+ for(const id of ids)await del(STORE,id);localStorage.removeItem('sw-gemini-last-import');await load();$('#geminiStatus').textContent=`已復原 ${ids.length} 件衣物。`;
+});
