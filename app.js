@@ -315,7 +315,7 @@ $('#orderResults').addEventListener('click',e=>{let b=e.target.closest('[data-or
 $('#orderSaveBtn').addEventListener('click',async()=>{const selected=orderDraft.filter(x=>x.include&&x.category!=='排除'&&x.name.trim());if(!selected.length)return alert('請先選擇至少一件衣物');let added=0,duplicate=0;try{for(const x of selected){const key=orderKey(x);if(items.some(it=>it.importKey===key)){duplicate++;continue}const item={id:uid(),name:x.name.trim(),category:x.category,color:x.color,style:'',season:'all',status:'owned',notes:[x.brand,x.sku?'商品編號 '+x.sku:'',x.size?'尺寸 '+x.size:'',x.price!=null?'購入價 NT$'+x.price:'',x.date?'購入日期 '+x.date:''].filter(Boolean).join(' · '),brand:x.brand,sku:x.sku,size:x.size,price:x.price,orderDate:x.date,importKey:key};if(x.photo){item.photo=x.photo;item.photoOriginal=x.photo;item.photoCutout=false}await put(STORE,item);items.push(item);added++}$('#orderDialog').close();await load();alert(`匯入完成：新增 ${added} 件，略過重複 ${duplicate} 件。`)}catch(err){await load();alert('部分匯入失敗：'+err.message)}});
 
 
-// v0.3.5.0: Gemini vision via private Cloudflare Worker; never place API key in the frontend.
+// v0.3.5.1: Gemini vision via private Cloudflare Worker; never place API key in the frontend.
 function geminiNormalize(x,brand){
  const name=String(x.name||'').trim().slice(0,100),category=studioCategories.includes(x.category)?x.category:orderCategory(name);
  return {name,brand:orderBrands.includes(x.brand)?x.brand:brand,orderId:String(x.orderId||'').replace(/\D/g,'').slice(0,20),date:String(x.date||'').slice(0,10),color:String(x.color||'').slice(0,60),size:String(x.size||'').slice(0,30),sku:String(x.sku||'').replace(/[^\dA-Za-z-]/g,'').slice(0,30),price:Number.isFinite(Number(x.price))&&x.price!==null&&x.price!==''?Number(x.price):null,quantity:Math.min(10,Math.max(1,Number(x.quantity)||1)),category,photo:null,include:true,confidence:Number(x.confidence)||0,exclude:!!x.exclude};
@@ -323,37 +323,40 @@ function geminiNormalize(x,brand){
 function geminiIsDuplicate(x){
  const key=orderKey(x);return items.some(it=>it.importKey===key || (x.sku&&it.sku===x.sku&&it.brand===x.brand&&String(it.color||'').toUpperCase()===x.color.toUpperCase()&&String(it.size||'').toUpperCase()===x.size.toUpperCase()));
 }
-function geminiSafeAuto(x){return x.name.length>=3&&x.confidence>=0.85&&!x.exclude&&x.category!=='排除'&&!!(x.sku||x.orderId)&&!!x.color&&!!x.size&&x.quantity===1&&!geminiIsDuplicate(x)}
+// v0.3.5.1: AI results are previews only. Never save until the user confirms.
 async function geminiImage(file){
  if(!file.type.startsWith('image/'))throw Error('只接受圖片檔案');
  const bitmap=await createImageBitmap(file);const scale=Math.min(1,1600/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement('canvas');canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close?.();return canvas.toDataURL('image/jpeg',0.82).split(',')[1];
 }
-async function geminiSave(x){
- const item={id:uid(),name:x.name,category:x.category,color:x.color,style:'',season:'all',status:'owned',notes:[x.brand,x.sku?'商品編號 '+x.sku:'',x.size?'尺寸 '+x.size:'',x.price!==null?'購入價 NT$'+x.price:'',x.date?'購入日期 '+x.date:''].filter(Boolean).join(' · '),brand:x.brand,sku:x.sku,size:x.size,price:x.price,orderDate:x.date,importKey:orderKey(x),aiImportedAt:new Date().toISOString()};await put(STORE,item);items.push(item);return item.id;
+function geminiDiagnosticText(payload, response){
+ const d=payload?.diagnostic;
+ if(!d)return `\n診斷：HTTP ${response.status}；Worker 未回傳診斷欄位，請確認已部署新版 worker.js。`;
+ return '\n診斷資訊：'+JSON.stringify(d,null,2);
 }
 $('#geminiImportBtn').addEventListener('click',async()=>{
  const btn=$('#geminiImportBtn'),status=$('#geminiStatus'),files=[...$('#orderImages').files],url=$('#geminiWorkerUrl').value.trim().replace(/\/+$/,'');
  if(!/^https:\/\/[a-z0-9.-]+(?:\:[0-9]+)?(?:\/[^?#]*)?$/i.test(url))return alert('請輸入 Cloudflare Worker 的 HTTPS 網址');
  if(!files.length)return alert('請先選擇訂單截圖');if(files.length>8)return alert('每次最多匯入 8 張截圖');
- localStorage.setItem('sw-gemini-worker',url);btn.disabled=true;const added=[];let pending=0,skipped=0;
+ localStorage.setItem('sw-gemini-worker',url);btn.disabled=true;let pending=0,skipped=0;
  try{
   for(let i=0;i<files.length;i++){
    status.textContent=`Gemini 分析中：${i+1}/${files.length} 張…`;const base64=await geminiImage(files[i]);
    const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),45000);let response;
    try{response=await fetch(url+'/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:base64,mimeType:'image/jpeg',brand:$('#orderBrand').value}),signal:ctrl.signal})}finally{clearTimeout(timer)}
-   const payload=await response.json().catch(()=>({error:'Worker 回傳格式錯誤'}));if(!response.ok)throw Error(payload.error||`HTTP ${response.status}`);
+   const payload=await response.json().catch(()=>({error:'Worker 回傳格式錯誤'}));
+   if(!response.ok)throw Error((payload.error||`HTTP ${response.status}`)+geminiDiagnosticText(payload,response));
    if(!Array.isArray(payload.items))throw Error('AI 未回傳商品陣列');
    for(const raw of payload.items.slice(0,40)){
-    const x=geminiNormalize(raw,$('#orderBrand').value);if(!x.name||x.exclude||x.category==='排除'){skipped++;continue}
-    if(geminiIsDuplicate(x)||added.some(a=>a.key===orderKey(x))){skipped++;continue}
-    if(geminiSafeAuto(x)){const id=await geminiSave(x);added.push({id,key:orderKey(x)})}
-    else{if(!orderDraft.some(y=>orderKey(y)===orderKey(x))){x.include=true;orderDraft.push(x);pending++}}
+    const x=geminiNormalize(raw,$('#orderBrand').value);
+    if(!x.name||x.exclude||x.category==='排除'){skipped++;continue}
+    if(geminiIsDuplicate(x)||orderDraft.some(y=>orderKey(y)===orderKey(x))){skipped++;continue}
+    x.include=true;orderDraft.push(x);pending++;
    }
+   renderOrderDraft(); // Keep already-recognized results if a later image fails.
   }
-  localStorage.setItem('sw-gemini-last-import',JSON.stringify(added.map(a=>a.id)));
-  await load();renderOrderDraft();status.textContent=`完成：自動新增 ${added.length} 件，待確認 ${pending} 件，略過 ${skipped} 件。`;
-  alert(status.textContent+(pending?'\n待確認商品請在下方檢查後手動加入。':''));
- }catch(err){localStorage.setItem('sw-gemini-last-import',JSON.stringify(added.map(a=>a.id)));await load();renderOrderDraft();status.textContent='AI 匯入中斷：'+err.message+`（已新增 ${added.length} 件）`;}
+  status.textContent=`辨識完成：待確認 ${pending} 件，略過 ${skipped} 件。尚未加入衣櫃。`;
+  alert(status.textContent+'\n請在下方檢查商品，最後按「確認加入衣櫃」。');
+ }catch(err){renderOrderDraft();status.textContent='AI 匯入中斷：'+err.message+`\n已保留 ${pending} 件待確認商品，尚未新增衣物。`;}
  finally{btn.disabled=false}
 });
 $('#geminiUndoBtn').addEventListener('click',async()=>{
