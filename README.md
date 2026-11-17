@@ -16,3 +16,11 @@
 - 在待確認商品中確認顏色與尺寸，按「讀取官方商品照片」嘗試取得候選圖，再確認儲存。
 - 品牌官網可能限制讀取圖片；此功能不保證每個商品都有照片。
 - Cloudflare Worker 沿用 v0.3.6.0，無需重新部署或更動 Placement。
+
+
+## v0.3.6.2 GPT 優先辨識
+- Cloudflare Worker 新增 `OPENAI_API_KEY` Secret（不可寫進 GitHub）。
+- `OPENAI_MODEL` 可選填；預設 `gpt-6-luna`，必須確認帳戶實際有權限且支援圖片輸入與 Chat Completions；不支援時可改用帳戶可用的視覺模型，例如 `gpt-4.1-mini`。
+- OpenAI 請求失敗時回退原 Gemini；回傳 `provider`、`model`、`usage` 用於診斷。
+- 僅須更新 Cloudflare Worker；前端沿用 v0.3.6.1，Worker 的 `/official-photo` 未修改。
+- OpenAI API 依實際用量計費，請在 OpenAI 平台關閉自動儲值並設定用量提醒。
