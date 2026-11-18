@@ -1,3 +1,9 @@
+Smart Wardrobe v0.3.6.8
+
+更新：商品分享文字即使沒有網址，也能依商品編號配對；支援多個【商品】區塊；未取得網址時提供官網搜尋，不會假造商品頁 URL。
+
+部署：以此 ZIP 內容覆蓋 GitHub Pages 專案前端檔案。Cloudflare Worker 不需修改。
+
 Smart Wardrobe v0.3.6.7 — 剪貼簿支援
 
 新增使用者點擊的剪貼簿讀取（text/plain / text/html）、貼上時嘗試從 HTML 連結補回官方網址；保留多項商品分享文字解析。iOS 支援程度視 Safari/PWA 與權限而定。Worker 不需更新。

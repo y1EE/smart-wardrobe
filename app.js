@@ -302,38 +302,49 @@ function parseOrderText(text,brand='GU'){
 }
 const SMART_WARDROBE_WORKER="https://smart-wardrobe-ai.lily0828x98.workers.dev";
 // v0.3.6.4: Parse official app share messages locally; never send share text to AI.
-function parseProductShareText(raw){
+function parseProductShareText(raw, fallbackBrand=''){
  const text=String(raw||'').trim();
  const urlMatch=text.match(/https:\/\/[^\s<>「」【】]+/i);
- if(!urlMatch)return {error:'分享文字中找不到 HTTPS 商品網址。請確認複製的是完整分享內容。'};
- let url;try{url=new URL(urlMatch[0].replace(/[，。；、）)]+$/g,''))}catch{return {error:'分享文字中的網址格式不正確'}}
- const host=url.hostname.toLowerCase();
- const brand=host==='gu-global.com'||host.endsWith('.gu-global.com')?'GU':host==='uniqlo.com'||host.endsWith('.uniqlo.com')?'UNIQLO':'';
- if(!brand||url.protocol!=='https:')return {error:'目前只支援 GU／UNIQLO 官方 HTTPS 商品連結'};
+ let url=null,brand='';
+ if(urlMatch){
+  try{url=new URL(urlMatch[0].replace(/[，。；、）)]+$/g,''))}catch{return {error:'分享文字中的網址格式不正確'}}
+  const host=url.hostname.toLowerCase();
+  brand=host==='gu-global.com'||host.endsWith('.gu-global.com')?'GU':host==='uniqlo.com'||host.endsWith('.uniqlo.com')?'UNIQLO':'';
+  if(!brand||url.protocol!=='https:')return {error:'目前只支援 GU／UNIQLO 官方 HTTPS 商品連結'};
+ }else{
+  // No link from iOS share sheet: use the explicit brand selector or brand in the message.
+  brand=/\bUNIQLO\b|優衣庫/i.test(text)?'UNIQLO':/\bGU\b|gu台灣|gu網路商店/i.test(text)?'GU':(['GU','UNIQLO'].includes(fallbackBrand)?fallbackBrand:'');
+  if(!brand)return {error:'缺少網址，請先選擇 GU 或 UNIQLO 購物品牌'};
+ }
  const bracket=text.match(/【([^】]{2,180})】/);
- let title=(bracket?.[1]||text.slice(0,text.indexOf(urlMatch[0]))).replace(/^快來看看\s*/,'').replace(/[。！!，,\s]+$/,'').trim();
- const sku=title.match(/\b(\d{6})\b/)?.[1]||text.match(/(?:商品編號|貨號)\s*[:：]?\s*(\d{6})/)?.[1]||'';
+ let title=(bracket?.[1]||(urlMatch?text.slice(0,text.indexOf(urlMatch[0])):text.split(/[。\n]/)[0])).replace(/^快來看看\s*/,'').replace(/[。！!，,\s]+$/,'').trim();
+ const sku=title.match(/(?:^|\D)(\d{6})(?!\d)/)?.[1]||text.match(/(?:商品編號|貨號)\s*[:：]?\s*(\d{6})/)?.[1]||'';
  title=title.replace(/\s*\b\d{6}\b\s*$/,'').trim();
  if(!title||title.length>110)return {error:'找不到明確的商品名稱，請使用手動新增'};
  const name=title.replace(/^(女裝|男裝|童裝)\s*/,'').trim();
- const item={name,brand,orderId:'',date:'',color:'',size:'',sku,price:null,quantity:1,category:orderCategory(name),photo:null,include:true,officialUrl:url.toString(),photoStatus:'已取得 App 分享的官方商品網址，請點「讀取官方商品照片」；顏色及尺寸請自行確認。'};
+ const item={name,brand,orderId:'',date:'',color:'',size:'',sku,price:null,quantity:1,category:orderCategory(name),photo:null,include:true,officialUrl:url?url.toString():'',photoStatus:url?'已取得官方商品網址，可嘗試依分享網址讀取照片。':'分享內容沒有網址；已保留商品資訊，可使用「搜尋官方照片」或「開啟官方搜尋」。'};
  item.include=item.category!=='排除';
  return {item};
 }
-// Parse multiple app-share messages. Each supported URL ends one product message.
-function parseProductShareBatch(raw){
+// Accept multiple 【product】 share messages even when iOS drops all URLs.
+function parseProductShareBatch(raw, fallbackBrand=''){
  const text=String(raw||'').trim();
- const matches=[...text.matchAll(/https:\/\/[^\s<>「」【】]+/gi)];
- if(!matches.length)return {items:[],errors:['沒有找到官方商品網址，請貼上完整的 App 分享文字。']};
+ if(!text)return {items:[],errors:['請先貼上商品分享文字。']};
+ const starts=[...text.matchAll(/(?:快來看看\s*)?【[^】]{2,180}】/g)].map(m=>m.index);
+ let segments=[];
+ if(starts.length){
+  if(text.slice(0,starts[0]).trim())segments.push(text.slice(0,starts[0]).trim());
+  for(let i=0;i<starts.length;i++)segments.push(text.slice(starts[i],starts[i+1]??text.length).trim());
+ }else{
+  // URLs can delimit plain-text messages; otherwise treat text as one product.
+  const urls=[...text.matchAll(/https:\/\/[^\s<>「」【】]+/gi)];
+  if(urls.length>1){let pos=0;for(const m of urls){let end=m.index+m[0].length;segments.push(text.slice(pos,end).trim());pos=end;}if(text.slice(pos).trim())segments.push(text.slice(pos).trim());}
+  else segments=[text];
+ }
  const items=[],errors=[];
- let start=0;
- for(const m of matches){
-  const end=m.index+m[0].length;
-  const segment=text.slice(start,end).trim();
-  const result=parseProductShareText(segment);
-  if(result.item)items.push(result.item);
-  else errors.push('第 '+(items.length+errors.length+1)+' 項：'+result.error);
-  start=end;
+ for(let i=0;i<segments.length;i++){
+  const result=parseProductShareText(segments[i],fallbackBrand);
+  if(result.item)items.push(result.item);else errors.push(`第 ${i+1} 項：${result.error}`);
  }
  return {items,errors};
 }
@@ -407,14 +418,14 @@ $('#productShareText').addEventListener('paste',e=>{
  }
 });
 $('#productShareImportBtn').addEventListener('click',()=>{
- const result=parseProductShareBatch($('#productShareText').value);
+ const result=parseProductShareBatch($('#productShareText').value,$('#orderBrand').value);
  const status=$('#productShareStatus');
  let matched=0,added=0;const unmatched=[];
  for(const item of result.items){
   const existing=orderDraft.find(x=>x.brand===item.brand&&item.sku&&x.sku===item.sku);
   if(existing){
-   existing.officialUrl=item.officialUrl;
-   existing.photoStatus='已配對 App 分享文字與官方網址。可點「依分享網址讀取照片」；請核對顏色與尺寸。';
+   if(item.officialUrl)existing.officialUrl=item.officialUrl;
+   existing.photoStatus=item.officialUrl?'已配對商品編號與官方網址，可依分享網址讀取照片。':'已依商品編號配對（分享內容無網址），可使用「搜尋官方照片」。';
    matched++;
   }else{
    // Preserve separate products when a SKU is absent; do not overwrite unrelated items.
@@ -422,7 +433,7 @@ $('#productShareImportBtn').addEventListener('click',()=>{
   }
  }
  renderOrderDraft();
- status.textContent=`解析 ${result.items.length} 項：配對 ${matched} 項、新增 ${added} 項。`+(result.errors.length?' 未成功：'+result.errors.join('；'):'')+(unmatched.length?' 新增商品請確認顏色及尺寸。':'');
+ status.textContent=`解析 ${result.items.length} 項（含無網址商品）：配對 ${matched} 項、新增 ${added} 項。`+(result.errors.length?' 未成功：'+result.errors.join('；'):'')+(unmatched.length?' 新增商品請確認顏色及尺寸。':'');
 });
 $('#orderAddBtn').addEventListener('click',()=>{orderDraft.push({name:'',brand:$('#orderBrand').value,orderId:'',date:'',color:'',size:'',sku:'',price:null,quantity:1,category:'上衣',photo:null,include:true});renderOrderDraft()});
 $('#orderResults').addEventListener('input',e=>{let parent=e.target.closest('[data-order-index]');if(!parent)return;let x=orderDraft[Number(parent.dataset.orderIndex)],field=e.target.dataset.orderField;if(!field)return;x[field]=field==='include'?e.target.checked:field==='price'?(e.target.value===''?null:Number(e.target.value)):e.target.value;$('#orderSaveBtn').textContent=`確認加入衣櫃（${orderDraft.filter(x=>x.include&&x.category!=='排除').length} 件）`});
