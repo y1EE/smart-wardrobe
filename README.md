@@ -36,3 +36,6 @@ Smart Wardrobe v0.3.6.5
 - Replace max_tokens with max_completion_tokens in OpenAI Chat Completions request.
 - Remove temperature parameter to avoid unsupported parameter errors on reasoning models.
 - Only Cloudflare Worker deployment is needed; GitHub Pages frontend remains unchanged.
+
+
+v0.3.6.6：實際修正 index.html 匯入訂單排版，移除 Worker URL 欄位，將分享文字區塊移至待匯入商品下方。前端版本與 PWA 快取已更新。
