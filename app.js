@@ -145,13 +145,13 @@ function weatherSettingsHTML(){return `<div class="section-head"><h2>天氣與�
 function weatherFresh(){return weatherInfo&&weatherInfo.prefKey===`${weatherPrefs.gps?'gps':'city'}:${weatherPrefs.city}`&&Date.now()-weatherInfo.fetched<weatherPrefs.minutes*60000}
 async function getWeather(force=false){if(weatherBusy||(!force&&weatherFresh()))return;weatherBusy=true;weatherError='';try{
  let city=WX_CITIES[weatherPrefs.city],lat=city.lat,lon=city.lon,place=city.name;
- if(weatherPrefs.gps){try{if(!navigator.geolocation)throw Error('瀏覽器不支援定位');const pos=await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,{timeout:4500,maximumAge:900000,enableHighAccuracy:false}));lat=pos.coords.latitude;lon=pos.coords.longitude;place='目前位置'}catch(err){place=city.name+'（定位未成功）';weatherError='無法取得目前位置，已改用'+city.name+'天氣。可在 iPhone 設定中檢查定位權限。'}}
+ if(weatherPrefs.gps){try{const last=JSON.parse(localStorage.getItem('sw-last-location')||'null');if(last&&Date.now()-last.at<24*3600000&&Number.isFinite(last.lat)&&Number.isFinite(last.lon)){lat=last.lat;lon=last.lon;place='目前位置（上次定位）'}else{if(!navigator.geolocation)throw Error('瀏覽器不支援定位');const pos=await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,{timeout:4500,maximumAge:900000,enableHighAccuracy:false}));lat=pos.coords.latitude;lon=pos.coords.longitude;place='目前位置';localStorage.setItem('sw-last-location',JSON.stringify({lat,lon,at:Date.now()}))}}catch(err){place=city.name+'（定位未成功）';weatherError='無法取得目前位置，已改用'+city.name+'天氣。可在 iPhone 設定中檢查定位權限。'}}
  const url=`https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}&current=temperature_2m,apparent_temperature,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=1`;
  const controller=new AbortController();const timeoutId=setTimeout(()=>controller.abort(),7000);let response;try{response=await fetch(url,{cache:'no-store',signal:controller.signal})}finally{clearTimeout(timeoutId)}if(!response.ok)throw Error('天氣服務暫時無法使用');const j=await response.json();if(!j.current||!j.daily)throw Error('天氣資料不完整');
  weatherInfo={place,temp:j.current.temperature_2m,feels:j.current.apparent_temperature,code:j.current.weather_code,high:j.daily.temperature_2m_max[0],low:j.daily.temperature_2m_min[0],rain:j.daily.precipitation_probability_max[0]??0,time:j.current.time.replace('T',' '),fetched:Date.now(),prefKey:`${weatherPrefs.gps?'gps':'city'}:${weatherPrefs.city}`};
  sessionStorage.setItem('sw-weather',JSON.stringify(weatherInfo));try{localStorage.setItem('sw-weather-last',JSON.stringify(weatherInfo))}catch{}
  }catch(err){weatherError=weatherInfo?'目前顯示上次天氣資料，暫時無法更新。':'無法更新天氣：'+(err.name==='AbortError'?'連線逾時':err.message)}finally{weatherBusy=false;if(page==='home'){const panel=document.querySelector('#weatherPanel');if(panel)panel.innerHTML=weatherMarkup()}}}
-function saveWeatherPrefs(){localStorage.setItem(WX_PREF,JSON.stringify(weatherPrefs));weatherInfo=null;weatherError='';try{const saved=JSON.parse(localStorage.getItem('sw-weather-last')||'null');if(saved&&saved.prefKey===`${weatherPrefs.gps?'gps':'city'}:${weatherPrefs.city}`&&Date.now()-saved.fetched<24*3600000)weatherInfo=saved}catch{}getWeather(true)}
+function saveWeatherPrefs(){if(!weatherPrefs.gps)localStorage.removeItem('sw-last-location');localStorage.setItem(WX_PREF,JSON.stringify(weatherPrefs));weatherInfo=null;weatherError='';try{const saved=JSON.parse(localStorage.getItem('sw-weather-last')||'null');if(saved&&saved.prefKey===`${weatherPrefs.gps?'gps':'city'}:${weatherPrefs.city}`&&Date.now()-saved.fetched<24*3600000)weatherInfo=saved}catch{}getWeather(true)}
 setInterval(()=>{if(!document.hidden)getWeather()},60000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)getWeather()});
 window.addEventListener('focus',()=>getWeather());
@@ -164,7 +164,7 @@ function outfitHTML(o){return `<article class="card outfit"><span class="pill">$
 function itemCard(x){return `<article class="card"><div class="item-img ${x.photo?'':'placeholder'}">${`<img class="item-img" src="${visual(x)}" alt="${esc(x.name)}${x.photo?'':'（示意圖）'}">`}</div><h3>${esc(x.name)}</h3><div class="row"><span class="pill">${esc(x.category)}</span>${x.status==='wishlist'?'<span class="pill">考慮購買</span>':''}${!x.photo?'<span class="pill">示意圖</span>':''}</div><p class="muted">${esc(x.color||'未分類')} · ${esc(x.style||'未設定')}</p><div class="row">${x.photo?`<button class="small-btn" data-ai-cutout="${esc(x.id)}">AI 去背（測試版）</button><button class="small-btn secondary" data-cutout="${esc(x.id)}">${x.photoCutout?'調整去背':'去背設定'}</button>${x.photoOriginal?`<button class="small-btn secondary" data-restore="${esc(x.id)}">還原原圖</button>`:''}`:''}<button class="small-btn secondary" data-edit="${esc(x.id)}">編輯</button><button class="small-btn danger" data-delete="${esc(x.id)}">刪除</button></div></article>`}
 function render(){document.querySelectorAll('.bottom button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));const app=$('#app');const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'long',day:'numeric',weekday:'long'});const count=owned().length;let html='';
 if(page==='home'){html=`<div class="hero"><div class="muted">${esc(today)}</div><h2>今天想穿什麼？</h2><p>從你已擁有的衣物，挑出適合自己的日常穿搭。</p><div id="weatherPanel">${weatherMarkup()}</div><p class="weather-help">天氣會自動更新，可至「設定」調整位置與更新頻率。</p><button data-page="outfits">看看今日推薦</button> <button class="secondary" data-page="studio">自由搭配工作室</button></div><div class="stats"><div class="card stat"><strong>${count}</strong><span class="muted">已擁有</span></div><div class="card stat"><strong>${items.length-count}</strong><span class="muted">購物候選</span></div><div class="card stat"><strong>${outfits().length}</strong><span class="muted">搭配提案</span></div></div><div class="section-head"><h2>今日穿搭靈感</h2></div><p class="muted">使用衣櫃照片排列成搭配預覽；無照片的衣物以示意圖呈現，尚非 AI 真人試穿效果。</p><div class="stack">${outfits().slice(0,1).map(outfitHTML).join('')||'<p class="empty">衣櫃單品不足，請先新增衣物。</p>'}</div>`}
-if(page==='closet'){let cats=['全部',...new Set(items.map(x=>x.category))];let shown=items.filter(x=>(filter==='全部'||x.category===filter)&&(showWishlist||x.status==='owned'));html=`<div class="section-head"><h2>我的衣櫃 · ${shown.length} 件</h2><div class="closet-actions"><button class="secondary" data-order-open>匯入訂單</button><button data-add>＋ 新增</button></div></div><div class="row"><label style="margin:0"><input type="checkbox" id="wishlistToggle" ${showWishlist?'checked':''} style="display:inline;width:auto;margin:0"> 顯示購物候選</label></div><div class="chips">${cats.map(c=>`<button class="chip ${filter===c?'active':''}" data-filter="${esc(c)}">${esc(c)}</button>`).join('')}</div><div class="grid">${shown.map(itemCard).join('')}</div>${shown.length?'':'<p class="empty">此分類目前沒有單品</p>'}`}
+if(page==='closet'){let cats=['全部',...new Set(items.map(x=>x.category))];let shown=items.filter(x=>(filter==='全部'||x.category===filter)&&(showWishlist||x.status==='owned'));html=`<div class="section-head"><h2>我的衣櫃 · ${shown.length} 件</h2><div class="closet-actions"><button class="secondary" data-order-open>匯入訂單</button><button data-add>＋ 新增</button></div></div><div class="row"><label class="wishlist-toggle"><input type="checkbox" id="wishlistToggle" ${showWishlist?'checked':''}><span>顯示購物候選</span></label></div><div class="chips">${cats.map(c=>`<button class="chip ${filter===c?'active':''}" data-filter="${esc(c)}">${esc(c)}</button>`).join('')}</div><div class="grid">${shown.map(itemCard).join('')}</div>${shown.length?'':'<p class="empty">此分類目前沒有單品</p>'}`}
 if(page==='outfits'){html=`<div class="section-head"><h2>三種穿搭提案</h2><button data-page="studio">自由搭配工作室</button></div><p class="muted">規則式推薦：只使用已擁有的衣物，並考慮必要配件。</p><label>目前季節<select id="seasonSelect"><option value="warm" ${localStorage.getItem('sw-season')==='warm'?'selected':''}>溫暖季節</option><option value="cool" ${localStorage.getItem('sw-season')!=='warm'?'selected':''}>涼爽季節</option></select></label><div class="stack">${outfits().map(outfitHTML).join('')||'<p class="empty">可用衣物不足，無法產生搭配。</p>'}</div><p class="notice">v0.1 為初步規則，並非 AI 分析；不會判斷照片中的衣服是否真正遮住腋下，請在新增單品時於備註標示。</p>`}
 if(page==='studio'){html=studioHTML()}
 if(page==='history'){html=`<div class="section-head"><h2>穿搭紀錄</h2></div><div id="historyList" class="stack"><p class="muted">正在讀取紀錄…</p></div>`}
@@ -300,7 +300,8 @@ function parseOrderText(text,brand='GU'){
  }
  commit();return found;
 }
-// v0.3.6.1: Parse official app share messages locally; never send share text to AI.
+const SMART_WARDROBE_WORKER="https://smart-wardrobe-ai.lily0828x98.workers.dev";
+// v0.3.6.4: Parse official app share messages locally; never send share text to AI.
 function parseProductShareText(raw){
  const text=String(raw||'').trim();
  const urlMatch=text.match(/https:\/\/[^\s<>「」【】]+/i);
@@ -319,9 +320,26 @@ function parseProductShareText(raw){
  item.include=item.category!=='排除';
  return {item};
 }
+// Parse multiple app-share messages. Each supported URL ends one product message.
+function parseProductShareBatch(raw){
+ const text=String(raw||'').trim();
+ const matches=[...text.matchAll(/https:\/\/[^\s<>「」【】]+/gi)];
+ if(!matches.length)return {items:[],errors:['沒有找到官方商品網址，請貼上完整的 App 分享文字。']};
+ const items=[],errors=[];
+ let start=0;
+ for(const m of matches){
+  const end=m.index+m[0].length;
+  const segment=text.slice(start,end).trim();
+  const result=parseProductShareText(segment);
+  if(result.item)items.push(result.item);
+  else errors.push('第 '+(items.length+errors.length+1)+' 項：'+result.error);
+  start=end;
+ }
+ return {items,errors};
+}
 function orderKey(x){return [x.brand||'',x.orderId||'',x.sku||'',x.name.trim().toLowerCase(),x.color.trim().toLowerCase(),x.size.trim().toLowerCase()].join('|')}
 function orderMerge(incoming){for(const x of incoming){let old=orderDraft.find(y=>orderKey(y)===orderKey(x));if(old){old.quantity=Math.max(old.quantity,x.quantity||1);continue}orderDraft.push(x)}renderOrderDraft()}
-function openOrderImporter(){orderDraft=[];orderOCRStatus='';const dlg=$('#orderDialog');dlg.showModal();$('#geminiWorkerUrl').value=localStorage.getItem('sw-gemini-worker')||'';$('#geminiStatus').textContent='';$('#productShareStatus').textContent='';$('#productShareText').value='';renderOrderDraft()}
+function openOrderImporter(){orderDraft=[];orderOCRStatus='';const dlg=$('#orderDialog');dlg.showModal();$('#geminiStatus').textContent='';$('#productShareStatus').textContent='';$('#productShareText').value='';renderOrderDraft()}
 function officialSearchUrl(x){
  const brand=x.brand==='GU'?'GU':x.brand==='UNIQLO'?'UNIQLO':'';
  const q=[brand,x.sku,x.color,x.name].filter(Boolean).join(' ');
@@ -329,18 +347,35 @@ function officialSearchUrl(x){
  return 'https://www.google.com/search?tbm=isch&q='+encodeURIComponent((domain?'site:'+domain+' ':'')+q);
 }
 async function officialPhotoLookup(x,providedUrl=''){
- const base=$('#geminiWorkerUrl').value.trim().replace(/\/+$/,'')||localStorage.getItem('sw-gemini-worker')||'';
+ const base=SMART_WARDROBE_WORKER;
  if(!/^https:\/\/[a-z0-9.-]+/i.test(base))throw Error('請先設定 Worker 網址');
  const r=await fetch(base+'/official-photo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brand:x.brand,sku:x.sku,color:x.color,name:x.name,productUrl:providedUrl})});
  const data=await r.json().catch(()=>({error:'搜尋服務回傳格式錯誤'}));
  if(!r.ok)throw Error(data.error||'搜尋失敗');return data;
 }
-function renderOrderDraft(){const area=$('#orderResults');if(!area)return;$('#orderOCRStatus').textContent=orderOCRStatus;area.innerHTML=orderDraft.map((x,i)=>`<div class="order-entry" data-order-index="${i}"><div class="order-entry-head"><label><input type="checkbox" data-order-field="include" ${x.include?'checked':''}> 匯入這件</label><span class="muted">${esc(x.orderId?'訂單末四碼 '+x.orderId.slice(-4):'訂單編號未辨識')}</span></div><label>名稱<input data-order-field="name" value="${esc(x.name)}"></label><div class="order-two"><label>品牌<select data-order-field="brand">${orderBrands.map(b=>`<option ${b===x.brand?'selected':''}>${b}</option>`).join('')}</select></label><label>分類<select data-order-field="category">${[...studioCategories,'排除'].map(c=>`<option ${c===x.category?'selected':''}>${c}</option>`).join('')}</select></label></div><div class="order-two"><label>商品編號<input data-order-field="sku" value="${esc(x.sku)}"></label><label>顏色<input data-order-field="color" value="${esc(x.color)}"></label></div><div class="order-two"><label>尺寸<input data-order-field="size" value="${esc(x.size)}"></label><label>單價 NT$<input type="number" min="0" data-order-field="price" value="${x.price??''}" placeholder="未提供"></label></div><div class="official-photo-panel"><div class="order-photo-row">${x.photo?`<img class="order-thumb" src="${x.photo}" alt="商品照片">`:`<div class="order-photo-empty">尚無商品照片</div>`}<div class="order-photo-actions"><button type="button" class="small-btn secondary" data-official-search="${i}">搜尋官方照片</button><a href="${esc(officialSearchUrl(x))}" target="_blank" rel="noopener noreferrer" class="official-link">開啟官方搜尋</a><small class="muted">${esc(x.photoSource==='official'?'已從官方頁面選取照片，請確認顏色與款式':x.photo?'已手動上傳照片':'不會使用訂單截圖當商品照')}</small></div></div><label>官方商品頁網址（可貼上搜尋到的官方網址）<input type="url" data-order-field="officialUrl" placeholder="https://www.gu-global.com/tw/..." value="${esc(x.officialUrl||'')}"></label><button type="button" class="small-btn secondary" data-official-verify="${i}">讀取官方商品照片</button><p class="muted official-status">${esc(x.photoStatus||'')}</p><label>或自行上傳商品照片<input type="file" accept="image/*" data-order-photo></label></div><button type="button" class="secondary small-btn" data-order-remove="${i}">移除此項</button></div>`).join('')||'<p class="muted">尚無辨識結果。可上傳截圖進行辨識，或貼上訂單文字後分析。</p>';$('#orderSaveBtn').textContent=`確認加入衣櫃（${orderDraft.filter(x=>x.include&&x.category!=='排除').length} 件）`}
+function renderOrderDraft(){const area=$('#orderResults');if(!area)return;$('#orderOCRStatus').textContent=orderOCRStatus;area.innerHTML=orderDraft.map((x,i)=>`<div class="order-entry" data-order-index="${i}"><div class="order-entry-head"><label><input type="checkbox" data-order-field="include" ${x.include?'checked':''}> 匯入這件</label><span class="muted">${esc(x.orderId?'訂單末四碼 '+x.orderId.slice(-4):'訂單編號未辨識')}</span></div><label>名稱<input data-order-field="name" value="${esc(x.name)}"></label><div class="order-two"><label>品牌<select data-order-field="brand">${orderBrands.map(b=>`<option ${b===x.brand?'selected':''}>${b}</option>`).join('')}</select></label><label>分類<select data-order-field="category">${[...studioCategories,'排除'].map(c=>`<option ${c===x.category?'selected':''}>${c}</option>`).join('')}</select></label></div><div class="order-two"><label>商品編號<input data-order-field="sku" value="${esc(x.sku)}"></label><label>顏色<input data-order-field="color" value="${esc(x.color)}"></label></div><div class="order-two"><label>尺寸<input data-order-field="size" value="${esc(x.size)}"></label><label>單價 NT$<input type="number" min="0" data-order-field="price" value="${x.price??''}" placeholder="未提供"></label></div><div class="official-photo-panel"><div class="order-photo-row">${x.photo?`<img class="order-thumb" src="${x.photo}" alt="商品照片">`:`<div class="order-photo-empty">尚無商品照片</div>`}<div class="order-photo-actions"><button type="button" class="small-btn secondary" data-official-search="${i}">搜尋官方照片</button><a href="${esc(officialSearchUrl(x))}" target="_blank" rel="noopener noreferrer" class="official-link">開啟官方搜尋</a><small class="muted">${esc(x.photoSource==='official'?'已從官方頁面選取照片，請確認顏色與款式':x.photo?'已手動上傳照片':'不會使用訂單截圖當商品照')}</small></div></div>${x.officialUrl?`<p class="muted">✓ 已透過 App 分享文字取得官方商品網址</p>`:""}${x.officialUrl?`<button type="button" class="small-btn secondary" data-official-verify="${i}">依分享網址讀取照片</button>`:""}<p class="muted official-status">${esc(x.photoStatus||'')}</p><label>或自行上傳商品照片<input type="file" accept="image/*" data-order-photo></label></div><button type="button" class="secondary small-btn" data-order-remove="${i}">移除此項</button></div>`).join('')||'<p class="muted">尚無辨識結果。可上傳截圖進行辨識，或貼上訂單文字後分析。</p>';$('#orderSaveBtn').textContent=`確認加入衣櫃（${orderDraft.filter(x=>x.include&&x.category!=='排除').length} 件）`}
 function orderScript(){return new Promise((res,rej)=>{if(window.Tesseract)return res();let script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';script.onload=res;script.onerror=()=>rej(Error('無法下載 OCR 程式，請檢查網路連線'));document.head.appendChild(script)})}
 async function orderOCR(files){if(orderOCRBusy)return;orderOCRBusy=true;$('#orderOCRBtn').disabled=true;try{await orderScript();orderOCRStatus='載入繁體中文辨識模型中，首次使用可能需要一些時間…';renderOrderDraft();const worker=await Tesseract.createWorker('chi_tra+eng',1,{logger:m=>{if(m.status){orderOCRStatus=`辨識中：${m.status} ${m.progress?Math.round(m.progress*100)+'%':''}`;$('#orderOCRStatus').textContent=orderOCRStatus}}});try{for(let i=0;i<files.length;i++){orderOCRStatus=`正在辨識第 ${i+1} / ${files.length} 張截圖…`;renderOrderDraft();let result=await worker.recognize(files[i]);let raw=result.data.text;$('#orderText').value+=($('#orderText').value?'\n':'')+raw;orderMerge(parseOrderText(raw,$('#orderBrand').value))}}finally{await worker.terminate()}orderOCRStatus='辨識完成。請逐項確認資料，漏辨識時可直接修改文字或手動新增。'}catch(err){orderOCRStatus='辨識未完成：'+err.message+'。可改用「貼上文字分析」或手動新增。'}finally{orderOCRBusy=false;$('#orderOCRBtn').disabled=false;renderOrderDraft()}}
 $('#orderOCRBtn').addEventListener('click',()=>{let f=$('#orderImages').files;if(!f.length)return alert('請先選擇訂單截圖');orderOCR([...f])});
 $('#orderParseBtn').addEventListener('click',()=>{let text=$('#orderText').value.trim();if(!text)return alert('請先貼上訂單文字');let parsed=parseOrderText(text,$('#orderBrand').value);if(!parsed.length)return alert('未辨識到商品名稱。請確認文字內容，或使用手動新增。');orderMerge(parsed)});
-$('#productShareImportBtn').addEventListener('click',()=>{const result=parseProductShareText($('#productShareText').value);const status=$('#productShareStatus');if(result.error){status.textContent=result.error;return}const item=result.item;const existing=orderDraft.find(x=>x.brand===item.brand&&x.sku&&x.sku===item.sku&&x.officialUrl===item.officialUrl);if(existing){status.textContent='此商品已在待確認清單中。';return}orderMerge([item]);status.textContent='已加入待確認清單：'+item.name+'（'+(item.sku||'無商品編號')+'）。請確認尺寸、顏色，並點「讀取官方商品照片」。';});
+$('#productShareImportBtn').addEventListener('click',()=>{
+ const result=parseProductShareBatch($('#productShareText').value);
+ const status=$('#productShareStatus');
+ let matched=0,added=0;const unmatched=[];
+ for(const item of result.items){
+  const existing=orderDraft.find(x=>x.brand===item.brand&&item.sku&&x.sku===item.sku);
+  if(existing){
+   existing.officialUrl=item.officialUrl;
+   existing.photoStatus='已配對 App 分享文字與官方網址。可點「依分享網址讀取照片」；請核對顏色與尺寸。';
+   matched++;
+  }else{
+   // Preserve separate products when a SKU is absent; do not overwrite unrelated items.
+   orderDraft.push(item);added++;unmatched.push(item.name);
+  }
+ }
+ renderOrderDraft();
+ status.textContent=`解析 ${result.items.length} 項：配對 ${matched} 項、新增 ${added} 項。`+(result.errors.length?' 未成功：'+result.errors.join('；'):'')+(unmatched.length?' 新增商品請確認顏色及尺寸。':'');
+});
 $('#orderAddBtn').addEventListener('click',()=>{orderDraft.push({name:'',brand:$('#orderBrand').value,orderId:'',date:'',color:'',size:'',sku:'',price:null,quantity:1,category:'上衣',photo:null,include:true});renderOrderDraft()});
 $('#orderResults').addEventListener('input',e=>{let parent=e.target.closest('[data-order-index]');if(!parent)return;let x=orderDraft[Number(parent.dataset.orderIndex)],field=e.target.dataset.orderField;if(!field)return;x[field]=field==='include'?e.target.checked:field==='price'?(e.target.value===''?null:Number(e.target.value)):e.target.value;$('#orderSaveBtn').textContent=`確認加入衣櫃（${orderDraft.filter(x=>x.include&&x.category!=='排除').length} 件）`});
 $('#orderResults').addEventListener('change',async e=>{let parent=e.target.closest('[data-order-index]');if(!parent)return;let x=orderDraft[Number(parent.dataset.orderIndex)];if(e.target.matches('[data-order-photo]')){let file=e.target.files[0];if(file){x.photo=await compressPhoto(file);x.photoSource='manual';x.photoStatus='已選擇自行上傳的照片';renderOrderDraft()}}else if(e.target.dataset.orderField){let field=e.target.dataset.orderField;x[field]=field==='include'?e.target.checked:e.target.value;$('#orderSaveBtn').textContent=`確認加入衣櫃（${orderDraft.filter(x=>x.include&&x.category!=='排除').length} 件）`}});
@@ -383,13 +418,13 @@ function geminiDiagnosticText(payload, response){
  return '\n診斷資訊：'+JSON.stringify(d,null,2);
 }
 $('#geminiImportBtn').addEventListener('click',async()=>{
- const btn=$('#geminiImportBtn'),status=$('#geminiStatus'),files=[...$('#orderImages').files],url=$('#geminiWorkerUrl').value.trim().replace(/\/+$/,'');
+ const btn=$('#geminiImportBtn'),status=$('#geminiStatus'),files=[...$('#orderImages').files],url=SMART_WARDROBE_WORKER;
  if(!/^https:\/\/[a-z0-9.-]+(?:\:[0-9]+)?(?:\/[^?#]*)?$/i.test(url))return alert('請輸入 Cloudflare Worker 的 HTTPS 網址');
  if(!files.length)return alert('請先選擇訂單截圖');if(files.length>8)return alert('每次最多匯入 8 張截圖');
- localStorage.setItem('sw-gemini-worker',url);btn.disabled=true;let pending=0,skipped=0;
+ btn.disabled=true;let pending=0,skipped=0;
  try{
   for(let i=0;i<files.length;i++){
-   status.textContent=`Gemini 分析中：${i+1}/${files.length} 張…`;const base64=await geminiImage(files[i]);
+   status.textContent=`AI 分析中：${i+1}/${files.length} 張…`;const base64=await geminiImage(files[i]);
    const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),45000);let response;
    try{response=await fetch(url+'/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:base64,mimeType:'image/jpeg',brand:$('#orderBrand').value}),signal:ctrl.signal})}finally{clearTimeout(timer)}
    const payload=await response.json().catch(()=>({error:'Worker 回傳格式錯誤'}));

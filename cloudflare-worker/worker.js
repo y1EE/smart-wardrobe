@@ -67,14 +67,14 @@ export default {async fetch(request,env){
  let data;try{data=await request.json()}catch{return reply({error:'無效 JSON'},400)}
  if(!data||typeof data.image!=='string'||data.image.length>5_500_000||!/^[A-Za-z0-9+/=]+$/.test(data.image)||data.mimeType!=='image/jpeg')return reply({error:'圖片格式不正確'},400);
  const prompt=`你是台灣 UNIQLO/GU 購物訂單辨識助手。從圖片逐件擷取實際商品，輸出 JSON 物件 {"items":[{"name":"","brand":"GU","orderId":"","date":"YYYY-MM-DD","sku":"","color":"","size":"","price":null,"quantity":1,"category":"上衣","confidence":0.0,"exclude":false}]}。品牌可為 GU/UNIQLO/其他。category 必須是 上衣、褲裝、裙裝、洋裝、外套、鞋子、帽子、襪子／褲襪、飾品、其他配件、排除 之一。不要猜看不到的資料，無法確認時留空；價格未知用 null，勿將訂單總額當單價。confidence 是你對名稱、顏色、尺寸和商品歸屬都正確的整體信心，0-1。購物袋、洗沐用品、贈品、非衣物設定 exclude=true。內衣褲可設排除。辨識多個訂單時不可混淆訂單編號。若同張圖有相同商品跨段重複出現，只列一次。只輸出 JSON。`;
- const diagnostic={colo:request.cf?.colo||'unknown',imageMimeType:data.mimeType,imageBase64Length:data.image.length,workerVersion:'0.3.6.2'};
+ const diagnostic={colo:request.cf?.colo||'unknown',imageMimeType:data.mimeType,imageBase64Length:data.image.length,workerVersion:'0.3.6.3'};
  const callWithTimeout=async(url,options)=>{const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),35000);try{return await fetch(url,{...options,signal:ctrl.signal})}finally{clearTimeout(timer)}};
  const parseItems=(text)=>{const parsed=JSON.parse(text);if(!parsed||!Array.isArray(parsed.items))throw Error('AI 回傳缺少 items 陣列');return parsed.items.slice(0,40)};
  let openaiFailure=null;
  if(env.OPENAI_API_KEY){
   const model=env.OPENAI_MODEL||OPENAI_DEFAULT_MODEL;
   try{
-   const r=await callWithTimeout('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+env.OPENAI_API_KEY},body:JSON.stringify({model,messages:[{role:'user',content:[{type:'text',text:prompt},{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+data.image,detail:'high'}}]}],response_format:{type:'json_object'},temperature:0,max_tokens:4096})});
+   const r=await callWithTimeout('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+env.OPENAI_API_KEY},body:JSON.stringify({model,messages:[{role:'user',content:[{type:'text',text:prompt},{type:'image_url',image_url:{url:'data:image/jpeg;base64,'+data.image,detail:'high'}}]}],response_format:{type:'json_object'},max_completion_tokens:4096})});
    const body=await r.json();
    if(r.ok){const items=parseItems(body.choices?.[0]?.message?.content||'');return reply({items,provider:'openai',model,usage:body.usage||null})}
    openaiFailure={status:r.status,message:String(body.error?.message||'OpenAI API error').slice(0,240),model};

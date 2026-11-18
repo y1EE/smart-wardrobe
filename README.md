@@ -1,3 +1,9 @@
+Smart Wardrobe v0.3.6.5
+
+- App 分享文字可一次貼上多件商品，逐一解析官方網址與商品編號，優先配對待匯入商品，未配對才新增。
+- 修正「顯示購物候選」勾選框與文字垂直對齊。
+- 僅需部署 GitHub Pages 前端；Cloudflare Worker 不變。
+
 # Smart Wardrobe v0.3.6.0 — 官方商品照片候選搜尋
 
 - 保留 v0.3.5.1 的 Gemini 訂單辨識、所有商品待確認、錯誤診斷。
@@ -24,3 +30,9 @@
 - OpenAI 請求失敗時回退原 Gemini；回傳 `provider`、`model`、`usage` 用於診斷。
 - 僅須更新 Cloudflare Worker；前端沿用 v0.3.6.1，Worker 的 `/official-photo` 未修改。
 - OpenAI API 依實際用量計費，請在 OpenAI 平台關閉自動儲值並設定用量提醒。
+
+
+## v0.3.6.3 GPT request compatibility fix
+- Replace max_tokens with max_completion_tokens in OpenAI Chat Completions request.
+- Remove temperature parameter to avoid unsupported parameter errors on reasoning models.
+- Only Cloudflare Worker deployment is needed; GitHub Pages frontend remains unchanged.
