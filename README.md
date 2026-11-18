@@ -1,3 +1,7 @@
+Smart Wardrobe v0.3.6.7 — 剪貼簿支援
+
+新增使用者點擊的剪貼簿讀取（text/plain / text/html）、貼上時嘗試從 HTML 連結補回官方網址；保留多項商品分享文字解析。iOS 支援程度視 Safari/PWA 與權限而定。Worker 不需更新。
+
 Smart Wardrobe v0.3.6.5
 
 - App 分享文字可一次貼上多件商品，逐一解析官方網址與商品編號，優先配對待匯入商品，未配對才新增。

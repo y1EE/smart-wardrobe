@@ -358,6 +358,54 @@ function orderScript(){return new Promise((res,rej)=>{if(window.Tesseract)return
 async function orderOCR(files){if(orderOCRBusy)return;orderOCRBusy=true;$('#orderOCRBtn').disabled=true;try{await orderScript();orderOCRStatus='載入繁體中文辨識模型中，首次使用可能需要一些時間…';renderOrderDraft();const worker=await Tesseract.createWorker('chi_tra+eng',1,{logger:m=>{if(m.status){orderOCRStatus=`辨識中：${m.status} ${m.progress?Math.round(m.progress*100)+'%':''}`;$('#orderOCRStatus').textContent=orderOCRStatus}}});try{for(let i=0;i<files.length;i++){orderOCRStatus=`正在辨識第 ${i+1} / ${files.length} 張截圖…`;renderOrderDraft();let result=await worker.recognize(files[i]);let raw=result.data.text;$('#orderText').value+=($('#orderText').value?'\n':'')+raw;orderMerge(parseOrderText(raw,$('#orderBrand').value))}}finally{await worker.terminate()}orderOCRStatus='辨識完成。請逐項確認資料，漏辨識時可直接修改文字或手動新增。'}catch(err){orderOCRStatus='辨識未完成：'+err.message+'。可改用「貼上文字分析」或手動新增。'}finally{orderOCRBusy=false;$('#orderOCRBtn').disabled=false;renderOrderDraft()}}
 $('#orderOCRBtn').addEventListener('click',()=>{let f=$('#orderImages').files;if(!f.length)return alert('請先選擇訂單截圖');orderOCR([...f])});
 $('#orderParseBtn').addEventListener('click',()=>{let text=$('#orderText').value.trim();if(!text)return alert('請先貼上訂單文字');let parsed=parseOrderText(text,$('#orderBrand').value);if(!parsed.length)return alert('未辨識到商品名稱。請確認文字內容，或使用手動新增。');orderMerge(parsed)});
+// iOS share-sheet copies can provide HTML links separately from plain text.
+// Clipboard reading must be triggered by the user's click; never read automatically.
+function shareHtmlToText(html){
+ const doc=new DOMParser().parseFromString(String(html||''),'text/html');
+ for(const a of doc.querySelectorAll('a[href]')){
+  const href=a.getAttribute('href')||'';
+  if(/^https:\/\//i.test(href)&&/gu-global\.com|uniqlo\.com/i.test(href))a.replaceWith(document.createTextNode((a.textContent||'').trim()+' '+href));
+ }
+ return (doc.body?.innerText||doc.body?.textContent||'').trim();
+}
+function combineShareClipboard(plain,html){
+ const a=String(plain||'').trim(),b=shareHtmlToText(html);
+ if(!a)return b;
+ if(/https:\/\/(?:[^\s]*\.)?(?:gu-global|uniqlo)\.com/i.test(a))return a;
+ const urls=[...b.matchAll(/https:\/\/[^\s<>「」【】]+/gi)].map(m=>m[0].replace(/[，。；、）)]+$/g,''));
+ return urls.length?a+'\n'+urls.join('\n'):a;
+}
+$('#productClipboardBtn').addEventListener('click',async()=>{
+ const status=$('#productShareStatus'),field=$('#productShareText');
+ status.textContent='正在讀取剪貼簿…';
+ try{
+  let plain='',html='';
+  if(navigator.clipboard?.read){
+   const items=await navigator.clipboard.read();
+   for(const item of items){
+    if(item.types.includes('text/plain'))plain+=await (await item.getType('text/plain')).text();
+    if(item.types.includes('text/html'))html+=await (await item.getType('text/html')).text();
+   }
+  }else if(navigator.clipboard?.readText){plain=await navigator.clipboard.readText()}
+  else throw Error('此瀏覽器不支援直接讀取剪貼簿');
+  const result=combineShareClipboard(plain,html);
+  if(!result){status.textContent='剪貼簿沒有可讀取的文字或網址，請長按輸入框貼上。';return}
+  field.value+=(field.value.trim()?'\n\n':'')+result;
+  const count=[...result.matchAll(/https:\/\/[^\s<>「」【】]+/gi)].length;
+  status.textContent=count?`已讀取剪貼簿，找到 ${count} 個網址。請確認內容後按「解析多項商品」。`:'已讀取文字，但沒有取得商品網址。可先貼到 LINE 再複製完整文字。';
+ }catch(e){status.textContent='無法直接讀取剪貼簿（可能受 iOS 權限限制）。請長按輸入框貼上；若缺網址，先貼到 LINE 再複製。'}
+});
+$('#productShareText').addEventListener('paste',e=>{
+ const clip=e.clipboardData;
+ if(!clip)return;
+ const plain=clip.getData('text/plain'),html=clip.getData('text/html');
+ const merged=combineShareClipboard(plain,html);
+ if(merged&&merged!==plain){
+  e.preventDefault();const el=e.currentTarget,start=el.selectionStart,end=el.selectionEnd;
+  el.setRangeText(merged,start,end,'end');
+  $('#productShareStatus').textContent='已從分享內容補入商品網址，請確認後解析。';
+ }
+});
 $('#productShareImportBtn').addEventListener('click',()=>{
  const result=parseProductShareBatch($('#productShareText').value);
  const status=$('#productShareStatus');
